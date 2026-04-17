@@ -1,0 +1,8 @@
+great_debate.db
+great_debate.db-journal
+great_debate.db-wal
+great_debate.db-shm
+.env
+__pycache__/
+*.pyc
+.venv/

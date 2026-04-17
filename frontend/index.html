@@ -50,6 +50,8 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
       margin-bottom: 2.1rem;
     }
 
@@ -350,12 +352,157 @@
         grid-template-columns: 1fr;
       }
     }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .auth {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+    }
+
+    .auth input[type="text"] {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.45rem 0.65rem;
+      color: var(--text);
+      font: inherit;
+      min-width: 140px;
+    }
+
+    .ghost-btn {
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 0.45rem 0.75rem;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .ghost-btn:hover {
+      border-color: rgba(255, 255, 255, 0.28);
+    }
+
+    .user-pill {
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    .user-pill strong {
+      color: var(--text);
+    }
+
+    .debate-shell {
+      margin-top: 1.2rem;
+      padding: 1.2rem;
+      border-radius: var(--radius);
+      border: 1px solid rgba(127, 109, 255, 0.35);
+      background: rgba(16, 22, 36, 0.9);
+    }
+
+    .debate-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.8rem;
+      flex-wrap: wrap;
+      margin-bottom: 0.9rem;
+      font-size: 0.92rem;
+      color: var(--muted);
+    }
+
+    .msg-list {
+      max-height: 320px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.55rem;
+      margin-bottom: 0.75rem;
+      padding-right: 0.25rem;
+    }
+
+    .bubble {
+      align-self: flex-start;
+      max-width: min(100%, 72ch);
+      padding: 0.55rem 0.75rem;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.04);
+      font-size: 0.9rem;
+    }
+
+    .bubble.me {
+      align-self: flex-end;
+      border-color: rgba(127, 109, 255, 0.45);
+      background: rgba(127, 109, 255, 0.12);
+    }
+
+    .bubble .who {
+      font-size: 0.72rem;
+      color: var(--muted);
+      margin-bottom: 0.2rem;
+    }
+
+    .composer {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      align-items: flex-end;
+    }
+
+    .composer textarea {
+      flex: 1 1 220px;
+      min-height: 72px;
+      resize: vertical;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text);
+      font: inherit;
+      padding: 0.6rem 0.75rem;
+    }
+
+    .verdict {
+      margin-top: 1rem;
+      padding: 1rem;
+      border-radius: 12px;
+      border: 1px solid rgba(45, 232, 176, 0.35);
+      background: rgba(45, 232, 176, 0.08);
+      color: #dfffe8;
+      font-size: 0.92rem;
+    }
+
+    .verdict h3 {
+      margin: 0 0 0.5rem;
+      font-size: 1rem;
+    }
+
+    .personas {
+      margin: 0.6rem 0 0;
+      padding-left: 1.1rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
   </style>
 </head>
 <body>
   <div class="layout">
     <header class="nav">
       <div class="brand">Great Debate</div>
+      <div class="auth" id="authBar">
+        <input type="text" id="handleInput" maxlength="32" placeholder="Pick a handle" autocomplete="off" />
+        <button type="button" class="primary-btn" id="registerBtn">Register</button>
+        <span class="user-pill hidden" id="userPill"></span>
+        <button type="button" class="ghost-btn hidden" id="logoutBtn">Sign out</button>
+      </div>
       <div class="badge"><span class="pulse" aria-hidden="true"></span> Daily Topic Live</div>
     </header>
 
@@ -378,11 +525,10 @@
       <aside class="card hero-side" aria-label="Live rankings preview">
         <span class="chip">Top Debaters Today</span>
         <div class="leaderboard">
-          <h2>Daily Leaderboard</h2>
-          <div class="row"><span>@logiclord</span><strong>1788</strong></div>
-          <div class="row"><span>@rhetoricqueen</span><strong>1752</strong></div>
-          <div class="row"><span>@counterpoint</span><strong>1717</strong></div>
-          <div class="row"><span>@you</span><strong>1610</strong></div>
+          <h2>Leaderboard</h2>
+          <div id="leaderboardRows">
+            <div class="row"><span class="muted">Loading…</span></div>
+          </div>
         </div>
       </aside>
     </section>
@@ -406,7 +552,24 @@
         </div>
 
         <div class="match-status" id="matchStatus" aria-live="polite">
-          Waiting for your side selection.
+          Register a handle, then choose a side.
+        </div>
+
+        <div class="debate-shell hidden" id="debatePanel" aria-live="polite">
+          <div class="debate-head">
+            <span id="debateMeta">Debate room</span>
+            <button type="button" class="ghost-btn" id="finishBtn">End &amp; get verdict</button>
+          </div>
+          <div class="msg-list" id="debateMessages"></div>
+          <div class="composer">
+            <textarea id="messageInput" placeholder="Write your argument…"></textarea>
+            <button type="button" class="primary-btn" id="sendBtn">Send</button>
+          </div>
+          <div class="verdict hidden" id="verdictBox">
+            <h3 id="verdictTitle">Verdict</h3>
+            <p id="verdictSummary"></p>
+            <ul class="personas" id="verdictPersonas"></ul>
+          </div>
         </div>
       </article>
 
@@ -436,109 +599,380 @@
 
   <script>
     (function () {
-      const topicBank = [
-        {
-          title: "Should AI-generated content require visible disclosure labels on all social feeds?",
-          description: "Debate trust, creativity, platform incentives, and whether mandatory labels help or hurt discourse.",
-          sides: [
-            "Yes - every AI-assisted post should be clearly labeled.",
-            "No - labeling should be optional or context-specific."
-          ]
-        },
-        {
-          title: "Should universities allow AI writing tools in graded coursework?",
-          description: "Discuss learning outcomes, fairness, access inequity, and what meaningful authorship should mean.",
-          sides: [
-            "Yes - AI is the new calculator and should be integrated.",
-            "No - unrestricted use undermines core writing skills."
-          ]
-        },
-        {
-          title: "Should cities prioritize public transit over expanding roads?",
-          description: "Compare economic growth, environmental impact, commuting equity, and implementation realism.",
-          sides: [
-            "Yes - invest in transit first for long-term gains.",
-            "No - road expansion remains the practical priority."
-          ]
-        },
-        {
-          title: "Should short-form video platforms be age-restricted for users under 16?",
-          description: "Balance youth safety and development against personal freedom, family agency, and enforcement challenges.",
-          sides: [
-            "Yes - strict age gates are necessary for wellbeing.",
-            "No - better parental controls are enough."
-          ]
+      var TOKEN_KEY = "gb_token";
+      var HANDLE_KEY = "gb_handle";
+      var UID_KEY = "gb_uid";
+
+      var state = {
+        token: localStorage.getItem(TOKEN_KEY),
+        handle: localStorage.getItem(HANDLE_KEY),
+        userId: localStorage.getItem(UID_KEY) ? parseInt(localStorage.getItem(UID_KEY), 10) : null,
+        selectedSide: null,
+        debateId: null,
+        queueTimer: null,
+        debateTimer: null
+      };
+
+      var dateEl = document.getElementById("topicDate");
+      var titleEl = document.getElementById("topicTitle");
+      var descriptionEl = document.getElementById("topicDescription");
+      var sidesContainer = document.getElementById("sidesContainer");
+      var queueBtn = document.getElementById("joinQueueBtn");
+      var queueNote = document.getElementById("queueNote");
+      var matchStatus = document.getElementById("matchStatus");
+      var leaderboardRows = document.getElementById("leaderboardRows");
+      var handleInput = document.getElementById("handleInput");
+      var registerBtn = document.getElementById("registerBtn");
+      var userPill = document.getElementById("userPill");
+      var logoutBtn = document.getElementById("logoutBtn");
+      var debatePanel = document.getElementById("debatePanel");
+      var debateMeta = document.getElementById("debateMeta");
+      var debateMessages = document.getElementById("debateMessages");
+      var messageInput = document.getElementById("messageInput");
+      var sendBtn = document.getElementById("sendBtn");
+      var finishBtn = document.getElementById("finishBtn");
+      var verdictBox = document.getElementById("verdictBox");
+      var verdictTitle = document.getElementById("verdictTitle");
+      var verdictSummary = document.getElementById("verdictSummary");
+      var verdictPersonas = document.getElementById("verdictPersonas");
+
+      function api(path, opts) {
+        opts = opts || {};
+        var headers = {};
+        if (state.token) {
+          headers["Authorization"] = "Bearer " + state.token;
         }
-      ];
-
-      const dateEl = document.getElementById("topicDate");
-      const titleEl = document.getElementById("topicTitle");
-      const descriptionEl = document.getElementById("topicDescription");
-      const sidesContainer = document.getElementById("sidesContainer");
-      const queueBtn = document.getElementById("joinQueueBtn");
-      const queueNote = document.getElementById("queueNote");
-      const matchStatus = document.getElementById("matchStatus");
-
-      let selectedSide = null;
-
-      function getDaySeed(date) {
-        return Math.floor(date.getTime() / 86400000);
-      }
-
-      function getDailyTopic(date) {
-        const idx = getDaySeed(date) % topicBank.length;
-        return topicBank[idx];
-      }
-
-      function renderTopic() {
-        const now = new Date();
-        const topic = getDailyTopic(now);
-        dateEl.textContent = "Topic for " + now.toLocaleDateString(undefined, {
-          weekday: "long",
-          month: "long",
-          day: "numeric"
-        });
-        titleEl.textContent = topic.title;
-        descriptionEl.textContent = topic.description;
-
-        sidesContainer.innerHTML = "";
-        topic.sides.forEach(function (sideText, index) {
-          const btn = document.createElement("button");
-          btn.type = "button";
-          btn.className = "side-btn";
-          btn.textContent = sideText;
-          btn.setAttribute("aria-pressed", "false");
-          btn.addEventListener("click", function () {
-            selectedSide = index;
-            Array.from(sidesContainer.querySelectorAll(".side-btn")).forEach(function (el, i) {
-              const active = i === selectedSide;
-              el.classList.toggle("active", active);
-              el.setAttribute("aria-pressed", String(active));
-            });
-            queueNote.textContent = "Ready: " + sideText;
-            matchStatus.textContent = "Side selected. Join queue to match with an opposing debater.";
+        var hasBody = opts.body !== undefined && opts.body !== null;
+        if (hasBody) {
+          headers["Content-Type"] = "application/json";
+        }
+        return fetch(path, {
+          method: opts.method || "GET",
+          headers: headers,
+          body: hasBody ? opts.body : undefined
+        }).then(function (r) {
+          return r.json().then(function (data) {
+            if (!r.ok) {
+              var err = new Error(data.error || r.statusText || "Request failed");
+              err.status = r.status;
+              throw err;
+            }
+            return data;
           });
-          sidesContainer.appendChild(btn);
         });
       }
+
+      function renderAuth() {
+        if (state.token && state.handle) {
+          handleInput.classList.add("hidden");
+          registerBtn.classList.add("hidden");
+          userPill.classList.remove("hidden");
+          logoutBtn.classList.remove("hidden");
+          userPill.innerHTML = "Signed in as <strong>@" + state.handle + "</strong>";
+        } else {
+          handleInput.classList.remove("hidden");
+          registerBtn.classList.remove("hidden");
+          userPill.classList.add("hidden");
+          logoutBtn.classList.add("hidden");
+        }
+      }
+
+      function persistSession(token, user) {
+        state.token = token;
+        state.handle = user.handle;
+        state.userId = user.id;
+        localStorage.setItem(TOKEN_KEY, token);
+        localStorage.setItem(HANDLE_KEY, user.handle);
+        localStorage.setItem(UID_KEY, String(user.id));
+        renderAuth();
+      }
+
+      function clearSession() {
+        state.token = null;
+        state.handle = null;
+        state.userId = null;
+        localStorage.removeItem(TOKEN_KEY);
+        localStorage.removeItem(HANDLE_KEY);
+        localStorage.removeItem(UID_KEY);
+        renderAuth();
+      }
+
+      function loadLeaderboard() {
+        api("/api/leaderboard?scope=daily")
+          .then(function (data) {
+            leaderboardRows.innerHTML = "";
+            if (!data.rows || data.rows.length === 0) {
+              leaderboardRows.innerHTML = '<div class="row"><span class="muted">No players yet — be the first.</span></div>';
+              return;
+            }
+            data.rows.forEach(function (row) {
+              var div = document.createElement("div");
+              div.className = "row";
+              div.innerHTML = "<span>@" + row.handle + "</span><strong>" + Math.round(row.rating) + "</strong>";
+              leaderboardRows.appendChild(div);
+            });
+          })
+          .catch(function () {
+            leaderboardRows.innerHTML = '<div class="row"><span class="muted">Could not load leaderboard.</span></div>';
+          });
+      }
+
+      function renderTopicFromServer() {
+        api("/api/topic/today")
+          .then(function (topic) {
+            var now = new Date();
+            dateEl.textContent = "Topic for " + now.toLocaleDateString(undefined, {
+              weekday: "long",
+              month: "long",
+              day: "numeric"
+            });
+            titleEl.textContent = topic.title;
+            descriptionEl.textContent = topic.description;
+            sidesContainer.innerHTML = "";
+            topic.sides.forEach(function (sideText, index) {
+              var btn = document.createElement("button");
+              btn.type = "button";
+              btn.className = "side-btn";
+              btn.textContent = sideText;
+              btn.setAttribute("aria-pressed", "false");
+              btn.addEventListener("click", function () {
+                state.selectedSide = index;
+                Array.from(sidesContainer.querySelectorAll(".side-btn")).forEach(function (el, i) {
+                  var active = i === state.selectedSide;
+                  el.classList.toggle("active", active);
+                  el.setAttribute("aria-pressed", String(active));
+                });
+                queueNote.textContent = "Ready: " + sideText;
+                matchStatus.textContent = "Side selected. Join queue when you are signed in.";
+              });
+              sidesContainer.appendChild(btn);
+            });
+          })
+          .catch(function (e) {
+            titleEl.textContent = "Could not load topic";
+            descriptionEl.textContent = (e && e.message) || "Network error";
+          });
+      }
+
+      function stopQueuePoll() {
+        if (state.queueTimer) {
+          clearInterval(state.queueTimer);
+          state.queueTimer = null;
+        }
+      }
+
+      function stopDebatePoll() {
+        if (state.debateTimer) {
+          clearInterval(state.debateTimer);
+          state.debateTimer = null;
+        }
+      }
+
+      function renderMessages(payload) {
+        debateMessages.innerHTML = "";
+        payload.messages.forEach(function (m) {
+          var div = document.createElement("div");
+          var isMe = m.user_id === state.userId;
+          div.className = "bubble" + (isMe ? " me" : "");
+          div.innerHTML =
+            '<div class="who">@' + m.handle + (isMe ? " (you)" : "") + "</div>" +
+            "<div>" + escapeHtml(m.body) + "</div>";
+          debateMessages.appendChild(div);
+        });
+        debateMessages.scrollTop = debateMessages.scrollHeight;
+      }
+
+      function escapeHtml(s) {
+        var d = document.createElement("div");
+        d.textContent = s;
+        return d.innerHTML;
+      }
+
+      function applyVerdict(payload) {
+        if (payload.status !== "completed" || !payload.verdict) {
+          verdictBox.classList.add("hidden");
+          return;
+        }
+        verdictBox.classList.remove("hidden");
+        var w = payload.winner_user_id;
+        verdictTitle.textContent = w === state.userId ? "You won this round" : "Opponent won this round";
+        verdictSummary.textContent = payload.verdict.summary || "";
+        verdictPersonas.innerHTML = "";
+        (payload.verdict.personas || []).forEach(function (p) {
+          var li = document.createElement("li");
+          li.textContent = p.name + " → @" + (p.favored_handle || "?") + " — " + (p.reason || "");
+          verdictPersonas.appendChild(li);
+        });
+        finishBtn.disabled = true;
+        sendBtn.disabled = true;
+        messageInput.disabled = true;
+        loadLeaderboard();
+      }
+
+      function pollDebateOnce() {
+        if (!state.debateId) return;
+        api("/api/debate/" + state.debateId)
+          .then(function (payload) {
+            debateMeta.textContent =
+              "vs @" + payload.opponent.handle + " · Your side: " + payload.topic.sides[payload.me_side];
+            renderMessages(payload);
+            if (payload.status === "completed") {
+              stopDebatePoll();
+              applyVerdict(payload);
+              matchStatus.textContent = "Debate finished. See verdict below.";
+              return;
+            }
+            verdictBox.classList.add("hidden");
+          })
+          .catch(function (e) {
+            matchStatus.textContent = e.message || "Lost connection to debate.";
+          });
+      }
+
+      function openDebate(id) {
+        state.debateId = id;
+        debatePanel.classList.remove("hidden");
+        verdictBox.classList.add("hidden");
+        finishBtn.disabled = false;
+        sendBtn.disabled = false;
+        messageInput.disabled = false;
+        stopDebatePoll();
+        pollDebateOnce();
+        state.debateTimer = setInterval(pollDebateOnce, 2000);
+      }
+
+      registerBtn.addEventListener("click", function () {
+        var h = (handleInput.value || "").trim();
+        if (!/^[a-zA-Z0-9_]{2,32}$/.test(h)) {
+          matchStatus.textContent = "Handle: 2–32 characters, letters, digits, underscore only.";
+          return;
+        }
+        api("/api/users/register", {
+          method: "POST",
+          body: JSON.stringify({ handle: h })
+        })
+          .then(function (res) {
+            persistSession(res.token, res.user);
+            userPill.innerHTML =
+              "Signed in as <strong>@" + res.user.handle + "</strong> · " + Math.round(res.user.rating) + " MMR";
+            matchStatus.textContent = "Welcome, @" + res.user.handle + ". Pick a side and join the queue.";
+            loadLeaderboard();
+          })
+          .catch(function (e) {
+            matchStatus.textContent = e.message || "Registration failed.";
+          });
+      });
+
+      logoutBtn.addEventListener("click", function () {
+        stopQueuePoll();
+        stopDebatePoll();
+        clearSession();
+        state.debateId = null;
+        debatePanel.classList.add("hidden");
+        matchStatus.textContent = "Signed out.";
+      });
 
       queueBtn.addEventListener("click", function () {
-        if (selectedSide === null) {
-          matchStatus.textContent = "Pick a side first so we can match you against the opposite argument.";
+        if (queueBtn.textContent === "Cancel search") {
+          stopQueuePoll();
+          api("/api/queue/leave", { method: "POST", body: JSON.stringify({}) })
+            .then(function () {
+              queueBtn.textContent = "Join Debate Queue";
+              matchStatus.textContent = "Left the queue.";
+            })
+            .catch(function (e) {
+              matchStatus.textContent = e.message || "Could not leave queue.";
+            });
+          return;
+        }
+        if (!state.token) {
+          matchStatus.textContent = "Register a handle first.";
+          return;
+        }
+        if (state.selectedSide === null) {
+          matchStatus.textContent = "Pick a side first.";
           return;
         }
         queueBtn.disabled = true;
-        queueBtn.textContent = "Searching...";
-        matchStatus.textContent = "Finding an opponent with the opposite stance...";
-
-        window.setTimeout(function () {
-          matchStatus.textContent = "Match found. Opening a private timed room now.";
-          queueBtn.disabled = false;
-          queueBtn.textContent = "Join Debate Queue";
-        }, 1400);
+        queueBtn.textContent = "Searching…";
+        matchStatus.textContent = "Finding an opponent with the opposite stance…";
+        api("/api/queue/join", { method: "POST", body: JSON.stringify({ side: state.selectedSide }) })
+          .then(function (res) {
+            if (res.status === "matched" && res.debate_id) {
+              stopQueuePoll();
+              queueBtn.disabled = false;
+              queueBtn.textContent = "Join Debate Queue";
+              matchStatus.textContent = "Match found — you are in a private room.";
+              openDebate(res.debate_id);
+              return;
+            }
+            stopQueuePoll();
+            queueBtn.disabled = false;
+            queueBtn.textContent = "Cancel search";
+            state.queueTimer = setInterval(function () {
+              api("/api/queue/status")
+                .then(function (st) {
+                  if (st.status === "matched" && st.debate_id) {
+                    stopQueuePoll();
+                    queueBtn.disabled = false;
+                    queueBtn.textContent = "Join Debate Queue";
+                    matchStatus.textContent = "Match found — you are in a private room.";
+                    openDebate(st.debate_id);
+                  }
+                })
+                .catch(function () {});
+            }, 1500);
+          })
+          .catch(function (e) {
+            queueBtn.disabled = false;
+            queueBtn.textContent = "Join Debate Queue";
+            matchStatus.textContent = e.message || "Could not join queue.";
+          });
       });
 
-      renderTopic();
+      sendBtn.addEventListener("click", function () {
+        var text = (messageInput.value || "").trim();
+        if (!text || !state.debateId) return;
+        api("/api/debate/" + state.debateId + "/message", {
+          method: "POST",
+          body: JSON.stringify({ text: text })
+        })
+          .then(function () {
+            messageInput.value = "";
+            pollDebateOnce();
+          })
+          .catch(function (e) {
+            matchStatus.textContent = e.message || "Send failed.";
+          });
+      });
+
+      finishBtn.addEventListener("click", function () {
+        if (!state.debateId) return;
+        api("/api/debate/" + state.debateId + "/finish", { method: "POST", body: JSON.stringify({}) })
+          .then(function () {
+            pollDebateOnce();
+          })
+          .catch(function (e) {
+            matchStatus.textContent = e.message || "Could not finish debate.";
+          });
+      });
+
+      renderAuth();
+      if (state.token) {
+        api("/api/me")
+          .then(function (me) {
+            state.userId = me.id;
+            state.handle = me.handle;
+            localStorage.setItem(UID_KEY, String(me.id));
+            localStorage.setItem(HANDLE_KEY, me.handle);
+            userPill.innerHTML = "Signed in as <strong>@" + me.handle + "</strong> · " + Math.round(me.rating) + " MMR";
+          })
+          .catch(function () {
+            clearSession();
+          });
+      }
+      renderTopicFromServer();
+      loadLeaderboard();
     })();
   </script>
 </body>

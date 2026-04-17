@@ -9,4 +9,5 @@ COPY . .
 
 EXPOSE 5000
 
-CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:5000", "app:app"]
+# Single worker: SQLite does not handle concurrent writes across multiple processes.
+CMD ["gunicorn", "-w", "1", "-b", "0.0.0.0:5000", "app:app"]
