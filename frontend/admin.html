@@ -3,48 +3,86 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Great Debate Admin</title>
+  <title>Great Debate Admin Analytics</title>
   <style>
     body { font-family: Inter, system-ui, sans-serif; margin: 0; background: #0b1020; color: #eef2ff; }
-    .wrap { width: min(1080px, 94vw); margin: 0 auto; padding: 1.2rem 0 2rem; }
-    .card { border: 1px solid rgba(255,255,255,.15); border-radius: 12px; background: rgba(255,255,255,.04); padding: 1rem; margin-bottom: 1rem; }
+    .wrap { width: min(1180px, 95vw); margin: 0 auto; padding: 1rem 0 2rem; }
+    .card { border: 1px solid rgba(255,255,255,.15); border-radius: 12px; background: rgba(255,255,255,.04); padding: 1rem; margin-bottom: .9rem; }
     .row { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; }
-    input, button { font: inherit; border-radius: 8px; padding: .45rem .6rem; }
-    input { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.2); color: #fff; min-width: 280px; }
+    input, select, button { font: inherit; border-radius: 8px; padding: .45rem .6rem; }
+    input, select { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.2); color: #fff; }
     button { border: 0; background: #7163ff; color: #fff; cursor: pointer; }
-    table { width: 100%; border-collapse: collapse; font-size: .9rem; }
-    th, td { border-bottom: 1px solid rgba(255,255,255,.12); text-align: left; padding: .55rem .3rem; vertical-align: top; }
+    .ghost { background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.2); }
+    .grid { display:grid; gap:.8rem; grid-template-columns: 1fr 1fr; }
+    .kpis { display:grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: .6rem; }
+    .kpi { border: 1px solid rgba(255,255,255,.15); border-radius: 10px; padding: .6rem; }
+    .kpi strong { display:block; font-size: 1.12rem; }
     .muted { color: #b6bedf; }
-    .pill { display: inline-block; padding: .1rem .4rem; border: 1px solid rgba(255,255,255,.2); border-radius: 999px; font-size: .75rem; margin-right: .3rem; }
+    table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+    th, td { border-bottom: 1px solid rgba(255,255,255,.12); text-align: left; padding: .52rem .3rem; vertical-align: top; }
+    .bar { height: 22px; background: rgba(255,255,255,.08); border-radius: 7px; overflow: hidden; margin: .35rem 0; }
+    .bar > span { display:block; height:100%; background: linear-gradient(100deg,#7f6dff,#2de8b0); }
+    @media (max-width: 930px) { .grid { grid-template-columns: 1fr; } .kpis { grid-template-columns: repeat(2,minmax(0,1fr)); } }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>Great Debate Admin</h1>
+    <h1>Admin Analytics</h1>
     <div class="card">
       <div class="row">
-        <label for="tokenInput">Admin token:</label>
+        <label>Admin token</label>
         <input id="tokenInput" type="password" placeholder="ADMIN_TOKEN" />
-        <button id="loadBtn" type="button">Load analytics</button>
+        <label>Start</label>
+        <input id="startInput" type="datetime-local" />
+        <label>End</label>
+        <input id="endInput" type="datetime-local" />
+        <label>Side</label>
+        <select id="sideInput"><option value="">All</option><option value="0">Side 0</option><option value="1">Side 1</option></select>
+        <label>Topic contains</label>
+        <input id="topicInput" type="text" placeholder="e.g. AI disclosure" />
       </div>
-      <p class="muted" id="status">Enter admin token and load.</p>
+      <div class="row" style="margin-top:.6rem;">
+        <button id="loadBtn" type="button">Apply filters</button>
+        <button id="exportBtn" class="ghost" type="button">Export Excel</button>
+      </div>
+      <p class="muted" id="status">Apply filters to load analytics.</p>
     </div>
+
     <div class="card">
-      <h2>Sentiment counts</h2>
-      <div id="counts">No data yet.</div>
+      <div class="kpis">
+        <div class="kpi"><span class="muted">Rows shown</span><strong id="kRecords">0</strong></div>
+        <div class="kpi"><span class="muted">Estimated sweep rate</span><strong id="kSweep">0%</strong></div>
+        <div class="kpi"><span class="muted">Distinct topics</span><strong id="kTopics">0</strong></div>
+        <div class="kpi"><span class="muted">Daily points</span><strong id="kDays">0</strong></div>
+      </div>
     </div>
+
+    <div class="grid">
+      <div class="card"><h2>Sentiment Mix</h2><div id="sentimentBars"></div></div>
+      <div class="card"><h2>Top Topics by Volume</h2><div id="topicBars"></div></div>
+    </div>
+    <div class="grid">
+      <div class="card"><h2>Daily Activity Trend</h2><div id="dailyBars"></div></div>
+      <div class="card"><h2>Side Position Insights</h2><div id="sideBars"></div></div>
+    </div>
+    <div class="grid">
+      <div class="card"><h2>Why this is useful</h2>
+        <ul>
+          <li>Captures opinions in natural adversarial discussion, not static forms.</li>
+          <li>Links sentiment and stance directly to concrete debate topics.</li>
+          <li>Tracks trend shifts over time with date-window filtering.</li>
+          <li>Exports analysis-ready records for external BI or research reports.</li>
+        </ul>
+      </div>
+    </div>
+
     <div class="card">
-      <h2>Recent player summaries</h2>
+      <h2>Filtered records</h2>
       <div style="overflow:auto;">
         <table>
           <thead>
             <tr>
-              <th>Debate</th>
-              <th>Handle</th>
-              <th>Side</th>
-              <th>Sentiment</th>
-              <th>Position summary</th>
-              <th>Toxicity flags</th>
+              <th>Time</th><th>Debate</th><th>Handle</th><th>Topic</th><th>Side</th><th>Sentiment</th><th>Summary</th><th>Toxicity</th>
             </tr>
           </thead>
           <tbody id="rows"></tbody>
@@ -55,64 +93,78 @@
   <script>
     (function () {
       var tokenInput = document.getElementById("tokenInput");
-      var loadBtn = document.getElementById("loadBtn");
+      var startInput = document.getElementById("startInput");
+      var endInput = document.getElementById("endInput");
+      var sideInput = document.getElementById("sideInput");
+      var topicInput = document.getElementById("topicInput");
       var status = document.getElementById("status");
-      var counts = document.getElementById("counts");
       var rows = document.getElementById("rows");
-
-      function renderCounts(items) {
-        if (!items || !items.length) {
-          counts.textContent = "No sentiment rows yet.";
-          return;
-        }
-        counts.innerHTML = items.map(function (x) {
-          return '<span class="pill">' + x.sentiment + ": " + x.count + "</span>";
+      function esc(s) { var d = document.createElement("div"); d.textContent = s || ""; return d.innerHTML; }
+      function q() {
+        var p = new URLSearchParams();
+        if (startInput.value) p.set("start", startInput.value.replace("T", " "));
+        if (endInput.value) p.set("end", endInput.value.replace("T", " "));
+        if (sideInput.value) p.set("side", sideInput.value);
+        if (topicInput.value.trim()) p.set("topic", topicInput.value.trim());
+        return p.toString();
+      }
+      function barRow(label, count, max, extra) {
+        var width = max > 0 ? Math.max(2, (count / max) * 100) : 0;
+        return '<div><div class="muted">' + esc(label) + (extra ? ' <small>(' + esc(extra) + ')</small>' : '') + '</div><div class="bar"><span style="width:' + width + '%"></span></div><div>' + count + '</div></div>';
+      }
+      function renderBars(el, items, labelKey, valueKey, extraFn) {
+        if (!items || !items.length) { el.innerHTML = '<p class="muted">No data.</p>'; return; }
+        var max = Math.max.apply(null, items.map(function (x) { return Number(x[valueKey] || 0); }));
+        el.innerHTML = items.map(function (x) {
+          return barRow(String(x[labelKey]), Number(x[valueKey] || 0), max, extraFn ? extraFn(x) : "");
         }).join("");
       }
-
-      function renderRows(items) {
+      function renderTable(items) {
         rows.innerHTML = "";
         if (!items || !items.length) {
-          rows.innerHTML = '<tr><td colspan="6" class="muted">No rows yet.</td></tr>';
+          rows.innerHTML = '<tr><td colspan="8" class="muted">No records for these filters.</td></tr>';
           return;
         }
         items.forEach(function (r) {
           var tr = document.createElement("tr");
-          var flags = (r.toxicity_flags || []).join(", ");
           tr.innerHTML =
+            "<td>" + esc(r.created_at) + "</td>" +
             "<td>" + r.debate_id + "</td>" +
-            "<td>@" + r.handle + "</td>" +
-            "<td>" + r.side + "</td>" +
-            "<td>" + r.sentiment_label + " (" + Number(r.sentiment_score || 0).toFixed(2) + ")</td>" +
-            "<td>" + escapeHtml(r.position_summary || "") + "</td>" +
-            "<td>" + escapeHtml(flags) + "</td>";
+            "<td>@" + esc(r.handle) + "</td>" +
+            "<td>" + esc(r.topic_title || "") + "</td>" +
+            "<td>" + r.side + " - " + esc(r.side_label || "") + "</td>" +
+            "<td>" + esc(r.sentiment_label) + " (" + Number(r.sentiment_score || 0).toFixed(2) + ")</td>" +
+            "<td>" + esc(r.position_summary) + "</td>" +
+            "<td>" + esc((r.toxicity_flags || []).join(", ")) + "</td>";
           rows.appendChild(tr);
         });
       }
-
-      function escapeHtml(s) {
-        var d = document.createElement("div");
-        d.textContent = s;
-        return d.innerHTML;
-      }
-
-      loadBtn.addEventListener("click", function () {
-        var token = (tokenInput.value || "").trim();
-        if (!token) {
-          status.textContent = "Token required.";
-          return;
-        }
-        status.textContent = "Loading...";
-        fetch("/api/admin/sentiment", { headers: { "X-Admin-Token": token } })
+      function loadData() {
+        var token = tokenInput.value.trim();
+        if (!token) { status.textContent = "Admin token required."; return; }
+        status.textContent = "Loading analytics...";
+        fetch("/api/admin/sentiment?" + q(), { headers: { "X-Admin-Token": token } })
           .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || "Failed"); return d; }); })
           .then(function (data) {
             status.textContent = "Loaded.";
-            renderCounts(data.counts || []);
-            renderRows(data.recent || []);
+            document.getElementById("kRecords").textContent = String((data.kpis && data.kpis.records) || 0);
+            document.getElementById("kSweep").textContent = String((data.kpis && data.kpis.sweep_rate) || 0) + "%";
+            document.getElementById("kTopics").textContent = String((data.topics || []).length);
+            document.getElementById("kDays").textContent = String((data.daily || []).length);
+            renderBars(document.getElementById("sentimentBars"), data.counts || [], "sentiment", "count");
+            renderBars(document.getElementById("topicBars"), data.topics || [], "topic", "count", function (x) { return "avg sentiment " + Number(x.avg_sentiment || 0).toFixed(2); });
+            renderBars(document.getElementById("dailyBars"), data.daily || [], "day", "count", function (x) { return "avg " + Number(x.avg_sentiment || 0).toFixed(2); });
+            renderBars(document.getElementById("sideBars"), data.sides || [], "side_label", "count", function (x) { return "side " + x.side + " | avg " + Number(x.avg_sentiment || 0).toFixed(2); });
+            renderTable(data.recent || []);
           })
-          .catch(function (e) {
-            status.textContent = e.message || "Failed to load.";
-          });
+          .catch(function (e) { status.textContent = e.message || "Failed to load analytics."; });
+      }
+      document.getElementById("loadBtn").addEventListener("click", loadData);
+      document.getElementById("exportBtn").addEventListener("click", function () {
+        var token = tokenInput.value.trim();
+        if (!token) { status.textContent = "Admin token required for export."; return; }
+        var url = "/api/admin/sentiment/export.xlsx?" + q() + (q() ? "&" : "") + "token=" + encodeURIComponent(token);
+        window.location.href = url;
       });
     })();
   </script>

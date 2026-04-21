@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Great Debate Results</title>
+  <style>
+    body { margin: 0; font-family: Inter, system-ui, sans-serif; background: radial-gradient(1200px 600px at 30% -20%, rgba(123,99,255,.25), transparent 55%), #0a0f1f; color: #edf2ff; }
+    .wrap { width: min(1100px, 94vw); margin: 0 auto; padding: 1rem 0 2rem; }
+    .hero { border-radius: 16px; border: 1px solid rgba(255,255,255,.15); padding: 1rem 1.2rem; margin-bottom: .9rem; position: relative; overflow: hidden; }
+    .hero::after { content: ""; position: absolute; inset: -40%; background: radial-gradient(circle, rgba(255,255,255,.15), transparent 65%); animation: spin 10s linear infinite; pointer-events: none; }
+    .hero.win { background: linear-gradient(110deg, rgba(50,200,140,.32), rgba(50,120,255,.24)); }
+    .hero.lose { background: linear-gradient(110deg, rgba(220,80,80,.26), rgba(120,80,190,.25)); }
+    .hero.pending { background: linear-gradient(110deg, rgba(238,184,76,.25), rgba(120,120,190,.20)); }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
+    .card { border-radius: 12px; border: 1px solid rgba(255,255,255,.13); background: rgba(255,255,255,.04); padding: .9rem; backdrop-filter: blur(5px); }
+    h1,h2,h3 { margin: 0 0 .45rem; }
+    .judge { margin: .45rem 0; padding: .55rem; border-radius: 10px; border: 1px solid rgba(255,255,255,.13); background: rgba(255,255,255,.03); }
+    .kpis { display:grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap:.5rem; }
+    .kpi { border:1px solid rgba(255,255,255,.18); border-radius:10px; padding:.55rem; }
+    .kpi strong { display:block; font-size:1.08rem; }
+    .muted { color:#bbc3e6; }
+    .btn { margin-top: .8rem; border:0; border-radius:10px; padding:.6rem .9rem; background:#7367ff; color:white; font-weight:700; cursor:pointer; }
+    .vote-wrap { margin: .65rem 0 1rem; }
+    .vote-bar { height: 24px; border-radius: 999px; overflow: hidden; border: 1px solid rgba(255,255,255,.22); background: rgba(255,255,255,.08); display:flex; }
+    .vote-a { background: linear-gradient(100deg,#62a6ff,#52e6bf); }
+    .vote-b { background: linear-gradient(100deg,#ff7a86,#ffb35f); }
+    .vote-labels { display:flex; justify-content: space-between; font-size:.85rem; margin-bottom:.35rem; color:#dbe1ff; }
+    .badge { display:inline-block; padding:.18rem .5rem; border:1px solid rgba(255,255,255,.26); border-radius:999px; font-size:.78rem; margin-left:.45rem; }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } .kpis { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero" id="hero">
+      <h1 id="title">Debate Results</h1>
+      <p class="muted" id="subtitle">Loading...</p>
+      <div id="outcomeBadge"></div>
+    </section>
+    <section class="grid">
+      <div class="card">
+        <h2>AI Judge Breakdown</h2>
+        <div class="vote-wrap">
+          <div class="vote-labels">
+            <span id="sideAName">Side A</span>
+            <span id="voteCount">0-0</span>
+            <span id="sideBName">Side B</span>
+          </div>
+          <div class="vote-bar">
+            <div class="vote-a" id="voteA" style="width:50%"></div>
+            <div class="vote-b" id="voteB" style="width:50%"></div>
+          </div>
+        </div>
+        <div id="judgeList"></div>
+      </div>
+      <div class="card">
+        <h2>Discussion Stats</h2>
+        <div class="kpis">
+          <div class="kpi"><span class="muted">Messages (You)</span><strong id="mMe">0</strong></div>
+          <div class="kpi"><span class="muted">Messages (Opponent)</span><strong id="mOpp">0</strong></div>
+          <div class="kpi"><span class="muted">Chars (You)</span><strong id="cMe">0</strong></div>
+          <div class="kpi"><span class="muted">Chars (Opponent)</span><strong id="cOpp">0</strong></div>
+        </div>
+        <h3 style="margin-top:.9rem;">Debate Topic</h3>
+        <p id="topic"></p>
+        <button class="btn" id="homeBtn" type="button">Back to Home</button>
+      </div>
+    </section>
+  </div>
+  <script>
+    (function () {
+      var TOKEN = localStorage.getItem("gb_token");
+      var UID = parseInt(localStorage.getItem("gb_uid") || "0", 10);
+      var debateId = new URLSearchParams(window.location.search).get("debate_id");
+      var hero = document.getElementById("hero");
+      function api(path) {
+        return fetch(path, { headers: { "Authorization": "Bearer " + TOKEN } })
+          .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || "Request failed"); return d; }); });
+      }
+      function esc(s) { var d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+      function render(payload) {
+        document.getElementById("topic").textContent = payload.topic.title + " — " + payload.topic.description;
+        document.getElementById("sideAName").textContent = payload.topic.sides[0];
+        document.getElementById("sideBName").textContent = payload.topic.sides[1];
+        document.getElementById("mMe").textContent = String(payload.stats.message_count_me || 0);
+        document.getElementById("mOpp").textContent = String(payload.stats.message_count_opponent || 0);
+        document.getElementById("cMe").textContent = String(payload.stats.char_count_me || 0);
+        document.getElementById("cOpp").textContent = String(payload.stats.char_count_opponent || 0);
+        var pending = payload.verdict_status === "pending" || !payload.verdict;
+        if (pending) {
+          hero.classList.add("pending");
+          document.getElementById("title").textContent = "Judgment Pending";
+          document.getElementById("subtitle").textContent = "AI pipeline is currently unavailable. Try again later.";
+          document.getElementById("outcomeBadge").innerHTML = '<span class="badge">Pending</span>';
+          document.getElementById("voteCount").textContent = "Pending";
+          document.getElementById("voteA").style.width = "50%";
+          document.getElementById("voteB").style.width = "50%";
+          document.getElementById("judgeList").innerHTML = '<p class="muted">No judge breakdown available yet.</p>';
+          return;
+        }
+        var won = payload.winner_user_id === UID;
+        hero.classList.add(won ? "win" : "lose");
+        document.getElementById("title").textContent = won ? "Victory" : "Tough Round";
+        document.getElementById("subtitle").textContent = payload.verdict.summary || "";
+        document.getElementById("outcomeBadge").innerHTML = won
+          ? '<span class="badge">Winner Theme Active</span>'
+          : '<span class="badge">Loss Reflection Mode</span>';
+        var a = Number(payload.verdict.votes_side_a || 0);
+        var b = Number(payload.verdict.votes_side_b || 0);
+        var total = Math.max(1, a + b);
+        document.getElementById("voteCount").textContent = a + " - " + b;
+        document.getElementById("voteA").style.width = ((a / total) * 100).toFixed(1) + "%";
+        document.getElementById("voteB").style.width = ((b / total) * 100).toFixed(1) + "%";
+        var html = "";
+        (payload.verdict.personas || []).forEach(function (p) {
+          html += '<div class="judge"><strong>' + esc(p.name) + '</strong><div class="muted">' + esc(p.reason || "") + "</div></div>";
+        });
+        document.getElementById("judgeList").innerHTML = html || '<p class="muted">No judge notes available.</p>';
+      }
+      document.getElementById("homeBtn").addEventListener("click", function () { window.location.href = "/"; });
+      if (!TOKEN || !debateId) { window.location.href = "/"; return; }
+      api("/api/debate/" + debateId).then(render).catch(function () { window.location.href = "/"; });
+    })();
+  </script>
+</body>
+</html>

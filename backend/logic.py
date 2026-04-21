@@ -51,23 +51,23 @@ K_ELO = 32
 
 JUDGE_PROFILES = [
     {
-        "name": "Judge 1 - Strong Side A Lean",
+        "name": "Judge 1",
         "bias": "You strongly prefer side A's framing by default.",
     },
     {
-        "name": "Judge 2 - Mild Side A Lean",
+        "name": "Judge 2",
         "bias": "You mildly prefer side A's framing by default.",
     },
     {
-        "name": "Judge 3 - Neutral Arbiter",
+        "name": "Judge 3",
         "bias": "You are neutral and evaluate only argument quality.",
     },
     {
-        "name": "Judge 4 - Mild Side B Lean",
+        "name": "Judge 4",
         "bias": "You mildly prefer side B's framing by default.",
     },
     {
-        "name": "Judge 5 - Strong Side B Lean",
+        "name": "Judge 5",
         "bias": "You strongly prefer side B's framing by default.",
     },
 ]
@@ -414,7 +414,7 @@ def judge_transcript(
 def finalize_debate(conn, debate_id: int) -> dict[str, Any]:
     row = conn.execute(
         """
-        SELECT d.*, ua.handle AS ha, ub.handle AS hb, t.side0_label, t.side1_label
+        SELECT d.*, ua.handle AS ha, ub.handle AS hb, t.side0_label, t.side1_label, t.title AS topic_title
         FROM debates d
         JOIN users ua ON ua.id = d.user_a_id
         JOIN users ub ON ub.id = d.user_b_id
@@ -465,13 +465,15 @@ def finalize_debate(conn, debate_id: int) -> dict[str, Any]:
             conn.execute(
                 """
                 INSERT INTO debate_ai_summaries (
-                    debate_id, user_id, side, position_summary, sentiment_label, sentiment_score, toxicity_flags
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    debate_id, user_id, side, topic_day_key, topic_title, position_summary, sentiment_label, sentiment_score, toxicity_flags
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     debate_id,
                     uid,
                     side,
+                    row["topic_day_key"],
+                    row["topic_title"],
                     p["position_summary"],
                     p["sentiment_label"],
                     p["sentiment_score"],

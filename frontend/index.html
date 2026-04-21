@@ -837,14 +837,7 @@
 
       function openDebate(id) {
         state.debateId = id;
-        debatePanel.classList.remove("hidden");
-        verdictBox.classList.add("hidden");
-        finishBtn.disabled = false;
-        sendBtn.disabled = false;
-        messageInput.disabled = false;
-        stopDebatePoll();
-        pollDebateOnce();
-        state.debateTimer = setInterval(pollDebateOnce, 2000);
+        window.location.href = "/debate?debate_id=" + encodeURIComponent(String(id));
       }
 
       registerBtn.addEventListener("click", function () {
@@ -982,6 +975,13 @@
           .catch(function () {
             clearSession();
           });
+        api("/api/queue/status")
+          .then(function (st) {
+            if (st.status === "matched" && st.debate_id) {
+              openDebate(st.debate_id);
+            }
+          })
+          .catch(function () {});
       }
       renderTopicFromServer();
       loadLeaderboard();

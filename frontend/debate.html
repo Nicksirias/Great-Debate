@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Great Debate Room</title>
+  <style>
+    body { margin: 0; font-family: Inter, system-ui, sans-serif; background: #0a0f1f; color: #eef2ff; }
+    .wrap { width: min(1200px, 95vw); margin: 0 auto; padding: 1rem 0 1.6rem; }
+    .top { display: grid; grid-template-columns: 1fr auto 1fr; gap: .8rem; align-items: stretch; margin-bottom: .9rem; }
+    .card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.15); border-radius: 14px; padding: .9rem; }
+    .player h3 { margin: 0 0 .2rem; }
+    .player .mmr { color: #b8c4ff; font-size: .9rem; }
+    .middle { text-align: center; display:flex; flex-direction:column; justify-content:center; }
+    .topic { font-size: .95rem; color: #d7ddff; }
+    .position { font-weight: 700; margin-top: .25rem; color: #8df0d0; }
+    .chat { height: 62vh; overflow-y: auto; display: flex; flex-direction: column; gap: .5rem; }
+    .msg { max-width: 75ch; padding: .6rem .75rem; border-radius: 11px; border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.05); }
+    .msg.me { align-self: flex-end; border-color: rgba(98,116,255,.5); background: rgba(98,116,255,.16); }
+    .who { font-size: .75rem; color: #bac4eb; margin-bottom: .2rem; }
+    .composer { display: flex; gap: .5rem; margin-top: .8rem; }
+    textarea { flex: 1; min-height: 76px; border-radius: 12px; border: 1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.05); color: #fff; font: inherit; padding: .6rem .75rem; }
+    button { border: 0; border-radius: 10px; background: linear-gradient(100deg,#7265ff,#ff6e58); color: white; font: inherit; font-weight: 700; padding: .7rem .95rem; cursor: pointer; }
+    .ghost { background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2); }
+    .foot { display: flex; gap: .6rem; justify-content: flex-end; margin-top: .7rem; }
+    #status { color: #b9c3e4; margin-top: .5rem; min-height: 1.2rem; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div class="card player">
+        <h3 id="meName">@you</h3>
+        <div class="mmr">MMR: <strong id="meMmr">-</strong></div>
+      </div>
+      <div class="card middle">
+        <div class="topic" id="topicTitle">Loading topic...</div>
+        <div class="position" id="myPosition">Your side:</div>
+      </div>
+      <div class="card player">
+        <h3 id="oppName">@opponent</h3>
+        <div class="mmr">MMR: <strong id="oppMmr">-</strong></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="chat" id="chat"></div>
+      <div class="composer">
+        <textarea id="msgInput" placeholder="Make your case..."></textarea>
+        <button id="sendBtn" type="button">Send</button>
+      </div>
+      <div class="foot">
+        <button class="ghost" id="leaveBtn" type="button">Back Home</button>
+        <button id="finishBtn" type="button">End Debate</button>
+      </div>
+      <div id="status"></div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var TOKEN = localStorage.getItem("gb_token");
+      var UID = parseInt(localStorage.getItem("gb_uid") || "0", 10);
+      var debateId = new URLSearchParams(window.location.search).get("debate_id");
+      var pollTimer = null;
+      var chat = document.getElementById("chat");
+      var status = document.getElementById("status");
+      var meName = document.getElementById("meName");
+      var meMmr = document.getElementById("meMmr");
+      var oppName = document.getElementById("oppName");
+      var oppMmr = document.getElementById("oppMmr");
+      var topicTitle = document.getElementById("topicTitle");
+      var myPosition = document.getElementById("myPosition");
+      var msgInput = document.getElementById("msgInput");
+      var sendBtn = document.getElementById("sendBtn");
+      var finishBtn = document.getElementById("finishBtn");
+
+      function api(path, opts) {
+        opts = opts || {};
+        var h = {};
+        if (TOKEN) h["Authorization"] = "Bearer " + TOKEN;
+        if (opts.body !== undefined) h["Content-Type"] = "application/json";
+        return fetch(path, { method: opts.method || "GET", headers: h, body: opts.body })
+          .then(function (r) { return r.json().then(function (d) { if (!r.ok) { var e = new Error(d.error || "Request failed"); e.status = r.status; throw e; } return d; }); });
+      }
+
+      function esc(s) { var d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+
+      function render(payload) {
+        meName.textContent = "@" + (payload.me && payload.me.handle ? payload.me.handle : "you");
+        meMmr.textContent = Math.round((payload.me && payload.me.rating) || 0);
+        oppName.textContent = "@" + payload.opponent.handle;
+        oppMmr.textContent = Math.round(payload.opponent.rating || 0);
+        topicTitle.textContent = payload.topic.title;
+        myPosition.textContent = "Your side: " + payload.topic.sides[payload.me_side];
+        chat.innerHTML = "";
+        (payload.messages || []).forEach(function (m) {
+          var isMe = m.user_id === UID;
+          var div = document.createElement("div");
+          div.className = "msg" + (isMe ? " me" : "");
+          div.innerHTML = '<div class="who">@' + esc(m.handle) + (isMe ? " (you)" : "") + '</div><div>' + esc(m.body) + "</div>";
+          chat.appendChild(div);
+        });
+        chat.scrollTop = chat.scrollHeight;
+        if (payload.status === "completed") {
+          clearInterval(pollTimer);
+          window.location.href = "/results?debate_id=" + encodeURIComponent(String(debateId));
+        }
+      }
+
+      function poll() {
+        api("/api/debate/" + debateId).then(render).catch(function (e) { status.textContent = e.message || "Connection issue."; });
+      }
+
+      sendBtn.addEventListener("click", function () {
+        var text = (msgInput.value || "").trim();
+        if (!text) return;
+        api("/api/debate/" + debateId + "/message", { method: "POST", body: JSON.stringify({ text: text }) })
+          .then(function () { msgInput.value = ""; poll(); })
+          .catch(function (e) { status.textContent = e.message || "Send failed."; });
+      });
+      finishBtn.addEventListener("click", function () {
+        api("/api/debate/" + debateId + "/finish", { method: "POST", body: JSON.stringify({}) })
+          .then(function () { status.textContent = "Calculating verdict..."; poll(); })
+          .catch(function (e) {
+            if (e.status === 503) {
+              alert("AI judging pipeline is unavailable right now. Please try again later. This debate has been marked pending judgment.");
+              window.location.href = "/results?debate_id=" + encodeURIComponent(String(debateId));
+              return;
+            }
+            status.textContent = e.message || "Could not finish debate.";
+          });
+      });
+      document.getElementById("leaveBtn").addEventListener("click", function () {
+        window.location.href = "/";
+      });
+
+      if (!TOKEN || !debateId) {
+        window.location.href = "/";
+        return;
+      }
+      poll();
+      pollTimer = setInterval(poll, 2000);
+    })();
+  </script>
+</body>
+</html>

@@ -98,6 +98,8 @@ def init_db():
             debate_id INTEGER NOT NULL,
             user_id INTEGER NOT NULL,
             side INTEGER NOT NULL,
+            topic_day_key TEXT,
+            topic_title TEXT,
             position_summary TEXT NOT NULL,
             sentiment_label TEXT NOT NULL,
             sentiment_score REAL,
@@ -129,3 +131,7 @@ def _migrate_schema(conn) -> None:
         conn.execute("ALTER TABLE debates ADD COLUMN verdict_status TEXT NOT NULL DEFAULT 'ready'")
     if not _has_column(conn, "debates", "judge_error"):
         conn.execute("ALTER TABLE debates ADD COLUMN judge_error TEXT")
+    if not _has_column(conn, "debate_ai_summaries", "topic_day_key"):
+        conn.execute("ALTER TABLE debate_ai_summaries ADD COLUMN topic_day_key TEXT")
+    if not _has_column(conn, "debate_ai_summaries", "topic_title"):
+        conn.execute("ALTER TABLE debate_ai_summaries ADD COLUMN topic_title TEXT")
