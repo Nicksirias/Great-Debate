@@ -55,12 +55,27 @@ This repo includes a `Dockerfile` and `Procfile` for web hosting platforms that 
 - `Dockerfile` runs the Flask app with Gunicorn on port `5000`
 - `Procfile` supports platforms like Heroku and similar container-based deploys
 
+## Durable storage on Render (recommended)
+
+This app uses SQLite. To keep debate history and AI analytics durable across restarts/redeploys, use a persistent disk.
+
+1. In Render, add a persistent disk (for example mounted at `/var/data`).
+2. Set environment variable:
+
+```bash
+DATABASE_PATH=/var/data/great_debate.db
+```
+
+Without a persistent disk, Render's ephemeral filesystem may lose the SQLite database when the instance is replaced.
+
 ## Configuration
 
 Rename `.env.example` to `.env` if you want to keep environment settings local.
 
 - `OPENAI_API_KEY` is required for full AI judge functionality on the web.
-- `OPENAI_MODEL` may be set to a preferred OpenAI model, such as `gpt-3.5-turbo`.
+- `OPENAI_MODEL` may be set to a preferred OpenAI model, such as `gpt-4.1-mini`.
+- `ADMIN_TOKEN` protects the admin analytics endpoint and `/admin` page access.
+- `DATABASE_PATH` controls where the SQLite file is stored.
 - `FLASK_ENV=development` is included for local development.
 
 > Note: I cannot provide actual API keys. To make the deployment fully functional, obtain an OpenAI API key and set it in the hosting environment or local `.env` file.

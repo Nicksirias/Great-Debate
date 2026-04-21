@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Great Debate Admin</title>
+  <style>
+    body { font-family: Inter, system-ui, sans-serif; margin: 0; background: #0b1020; color: #eef2ff; }
+    .wrap { width: min(1080px, 94vw); margin: 0 auto; padding: 1.2rem 0 2rem; }
+    .card { border: 1px solid rgba(255,255,255,.15); border-radius: 12px; background: rgba(255,255,255,.04); padding: 1rem; margin-bottom: 1rem; }
+    .row { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; }
+    input, button { font: inherit; border-radius: 8px; padding: .45rem .6rem; }
+    input { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.2); color: #fff; min-width: 280px; }
+    button { border: 0; background: #7163ff; color: #fff; cursor: pointer; }
+    table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+    th, td { border-bottom: 1px solid rgba(255,255,255,.12); text-align: left; padding: .55rem .3rem; vertical-align: top; }
+    .muted { color: #b6bedf; }
+    .pill { display: inline-block; padding: .1rem .4rem; border: 1px solid rgba(255,255,255,.2); border-radius: 999px; font-size: .75rem; margin-right: .3rem; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Great Debate Admin</h1>
+    <div class="card">
+      <div class="row">
+        <label for="tokenInput">Admin token:</label>
+        <input id="tokenInput" type="password" placeholder="ADMIN_TOKEN" />
+        <button id="loadBtn" type="button">Load analytics</button>
+      </div>
+      <p class="muted" id="status">Enter admin token and load.</p>
+    </div>
+    <div class="card">
+      <h2>Sentiment counts</h2>
+      <div id="counts">No data yet.</div>
+    </div>
+    <div class="card">
+      <h2>Recent player summaries</h2>
+      <div style="overflow:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Debate</th>
+              <th>Handle</th>
+              <th>Side</th>
+              <th>Sentiment</th>
+              <th>Position summary</th>
+              <th>Toxicity flags</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var tokenInput = document.getElementById("tokenInput");
+      var loadBtn = document.getElementById("loadBtn");
+      var status = document.getElementById("status");
+      var counts = document.getElementById("counts");
+      var rows = document.getElementById("rows");
+
+      function renderCounts(items) {
+        if (!items || !items.length) {
+          counts.textContent = "No sentiment rows yet.";
+          return;
+        }
+        counts.innerHTML = items.map(function (x) {
+          return '<span class="pill">' + x.sentiment + ": " + x.count + "</span>";
+        }).join("");
+      }
+
+      function renderRows(items) {
+        rows.innerHTML = "";
+        if (!items || !items.length) {
+          rows.innerHTML = '<tr><td colspan="6" class="muted">No rows yet.</td></tr>';
+          return;
+        }
+        items.forEach(function (r) {
+          var tr = document.createElement("tr");
+          var flags = (r.toxicity_flags || []).join(", ");
+          tr.innerHTML =
+            "<td>" + r.debate_id + "</td>" +
+            "<td>@" + r.handle + "</td>" +
+            "<td>" + r.side + "</td>" +
+            "<td>" + r.sentiment_label + " (" + Number(r.sentiment_score || 0).toFixed(2) + ")</td>" +
+            "<td>" + escapeHtml(r.position_summary || "") + "</td>" +
+            "<td>" + escapeHtml(flags) + "</td>";
+          rows.appendChild(tr);
+        });
+      }
+
+      function escapeHtml(s) {
+        var d = document.createElement("div");
+        d.textContent = s;
+        return d.innerHTML;
+      }
+
+      loadBtn.addEventListener("click", function () {
+        var token = (tokenInput.value || "").trim();
+        if (!token) {
+          status.textContent = "Token required.";
+          return;
+        }
+        status.textContent = "Loading...";
+        fetch("/api/admin/sentiment", { headers: { "X-Admin-Token": token } })
+          .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || "Failed"); return d; }); })
+          .then(function (data) {
+            status.textContent = "Loaded.";
+            renderCounts(data.counts || []);
+            renderRows(data.recent || []);
+          })
+          .catch(function (e) {
+            status.textContent = e.message || "Failed to load.";
+          });
+      });
+    })();
+  </script>
+</body>
+</html>

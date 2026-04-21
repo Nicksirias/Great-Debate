@@ -1,6 +1,7 @@
 """Great Debate Flask app: static frontend + JSON API."""
 
 import json
+import os
 import re
 import secrets
 from pathlib import Path
@@ -50,9 +51,24 @@ def _require_user(conn):
     return u, None
 
 
+def _require_admin():
+    configured = (os.environ.get("ADMIN_TOKEN") or "").strip()
+    if not configured:
+        return _json_error(503, "ADMIN_TOKEN is not configured on the server.")
+    provided = (request.headers.get("X-Admin-Token") or request.args.get("token") or "").strip()
+    if provided != configured:
+        return _json_error(401, "Missing or invalid admin token.")
+    return None
+
+
 @app.get("/")
 def index():
     return send_from_directory(_FRONTEND, "index.html")
+
+
+@app.get("/admin")
+def admin_index():
+    return send_from_directory(_FRONTEND, "admin.html")
 
 
 @app.get("/healthz")
@@ -261,6 +277,7 @@ def _debate_payload(conn, debate_id: int, user_id: int):
     out = {
         "id": d["id"],
         "status": d["status"],
+        "verdict_status": d["verdict_status"] or "ready",
         "topic": {
             "title": d["topic_title"],
             "description": d["topic_desc"],
@@ -283,6 +300,8 @@ def _debate_payload(conn, debate_id: int, user_id: int):
     if d["status"] == "completed" and d["judge_json"]:
         out["verdict"] = json.loads(d["judge_json"])
         out["winner_user_id"] = d["winner_user_id"]
+        if d["judge_error"]:
+            out["judge_error"] = d["judge_error"]
     return out
 
 
@@ -354,6 +373,61 @@ def finish_debate(debate_id: int):
     if d["user_a_id"] != u["id"] and d["user_b_id"] != u["id"]:
         return _json_error(403, "You are not in this debate.")
 
-    logic.finalize_debate(conn, debate_id)
+    result = logic.finalize_debate(conn, debate_id)
+    if result.get("status") == "pending":
+        r = jsonify(
+            {
+                "ok": False,
+                "status": "pending",
+                "error": "AI judging pipeline is unavailable. Debate marked pending judgment.",
+            }
+        )
+        r.status_code = 503
+        return r
     return jsonify({"ok": True, "status": "completed"})
+
+
+@app.get("/api/admin/sentiment")
+def admin_sentiment():
+    err = _require_admin()
+    if err:
+        return err
+    conn = get_db()
+    rows = conn.execute(
+        """
+        SELECT sentiment_label, COUNT(*) AS n
+        FROM debate_ai_summaries
+        GROUP BY sentiment_label
+        ORDER BY n DESC
+        """
+    ).fetchall()
+    recent = conn.execute(
+        """
+        SELECT s.debate_id, s.user_id, u.handle, s.side, s.position_summary, s.sentiment_label,
+               s.sentiment_score, s.toxicity_flags, s.created_at
+        FROM debate_ai_summaries s
+        JOIN users u ON u.id = s.user_id
+        ORDER BY s.id DESC
+        LIMIT 100
+        """
+    ).fetchall()
+    return jsonify(
+        {
+            "counts": [{"sentiment": r["sentiment_label"], "count": r["n"]} for r in rows],
+            "recent": [
+                {
+                    "debate_id": r["debate_id"],
+                    "user_id": r["user_id"],
+                    "handle": r["handle"],
+                    "side": r["side"],
+                    "position_summary": r["position_summary"],
+                    "sentiment_label": r["sentiment_label"],
+                    "sentiment_score": r["sentiment_score"],
+                    "toxicity_flags": json.loads(r["toxicity_flags"] or "[]"),
+                    "created_at": r["created_at"],
+                }
+                for r in recent
+            ],
+        }
+    )
 

@@ -795,7 +795,13 @@
         }
         verdictBox.classList.remove("hidden");
         var w = payload.winner_user_id;
-        verdictTitle.textContent = w === state.userId ? "You won this round" : "Opponent won this round";
+        if (payload.verdict_status === "pending" || payload.verdict.pending_judgment) {
+          verdictTitle.textContent = "Judgment pending";
+        } else if (!w) {
+          verdictTitle.textContent = "No winner yet";
+        } else {
+          verdictTitle.textContent = w === state.userId ? "You won this round" : "Opponent won this round";
+        }
         verdictSummary.textContent = payload.verdict.summary || "";
         verdictPersonas.innerHTML = "";
         (payload.verdict.personas || []).forEach(function (p) {
@@ -953,6 +959,12 @@
             pollDebateOnce();
           })
           .catch(function (e) {
+            if (e.status === 503) {
+              window.alert("AI judging pipeline is unavailable right now. Please try again later. This debate has been marked pending judgment.");
+              matchStatus.textContent = "Debate marked pending judgment.";
+              pollDebateOnce();
+              return;
+            }
             matchStatus.textContent = e.message || "Could not finish debate.";
           });
       });
