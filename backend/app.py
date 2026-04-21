@@ -141,15 +141,16 @@ def me():
 def topic_today():
     conn = get_db()
     dk = logic.day_key_from_dt()
-    logic.ensure_topic_row(conn, dk)
+    u = _current_user(conn)
+    topic = logic.topic_for_user(conn, dk, u["id"] if u else None)
     conn.commit()
-    row = conn.execute("SELECT * FROM topics WHERE day_key = ?", (dk,)).fetchone()
     return jsonify(
         {
-            "day_key": row["day_key"],
-            "title": row["title"],
-            "description": row["description"],
-            "sides": [row["side0_label"], row["side1_label"]],
+            "day_key": dk,
+            "variant": topic["variant"],
+            "title": topic["title"],
+            "description": topic["description"],
+            "sides": topic["sides"],
         }
     )
 
@@ -211,7 +212,8 @@ def queue_join():
         return jsonify({"status": "matched", "debate_id": active["id"]})
 
     dk = logic.day_key_from_dt()
-    debate_id = logic.try_match_queue(conn, u["id"], dk, side)
+    topic = logic.topic_for_user(conn, dk, u["id"])
+    debate_id = logic.try_match_queue(conn, u["id"], dk, side, topic_variant=topic["variant"])
     if debate_id:
         return jsonify({"status": "matched", "debate_id": debate_id})
     return jsonify({"status": "waiting"})
@@ -256,12 +258,15 @@ def _debate_payload(conn, debate_id: int, user_id: int):
         """
         SELECT d.*, ua.handle AS ha, ub.handle AS hb,
                ua.rating AS ra, ub.rating AS rb,
-               t.title AS topic_title, t.description AS topic_desc,
-               t.side0_label, t.side1_label
+               COALESCE(te.title, t.title) AS topic_title,
+               COALESCE(te.description, t.description) AS topic_desc,
+               COALESCE(te.side0_label, t.side0_label) AS side0_label,
+               COALESCE(te.side1_label, t.side1_label) AS side1_label
         FROM debates d
         JOIN users ua ON ua.id = d.user_a_id
         JOIN users ub ON ub.id = d.user_b_id
         JOIN topics t ON t.day_key = d.topic_day_key
+        LEFT JOIN topic_experiments te ON te.day_key = d.topic_day_key AND te.variant = d.topic_variant
         WHERE d.id = ?
         """,
         (debate_id,),
@@ -414,6 +419,287 @@ def finish_debate(debate_id: int):
         r.status_code = 503
         return r
     return jsonify({"ok": True, "status": "completed"})
+
+
+@app.post("/api/admin/retry-pending")
+def admin_retry_pending():
+    err = _require_admin()
+    if err:
+        return err
+    conn = get_db()
+    limit = max(1, min(int(request.args.get("limit") or 10), 100))
+    rows = conn.execute(
+        """
+        SELECT id FROM debates
+        WHERE status = 'completed' AND verdict_status = 'pending'
+        ORDER BY ended_at DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    retried = 0
+    success = 0
+    for r in rows:
+        retried += 1
+        out = logic.retry_pending_debate(conn, r["id"])
+        if out.get("ok"):
+            success += 1
+    return jsonify({"retried": retried, "succeeded": success, "failed": retried - success})
+
+
+@app.get("/api/admin/insight-brief")
+def admin_insight_brief():
+    err = _require_admin()
+    if err:
+        return err
+    conn = get_db()
+    where_sql, params = _admin_filter_args()
+    rows = _admin_recent_rows(conn, where_sql, params)
+    if not rows:
+        return jsonify({"brief": "No records in selected filter window."})
+    sentiment_counts = {}
+    side_counts = {}
+    topic_counts = {}
+    for r in rows:
+        sentiment_counts[r["sentiment_label"]] = sentiment_counts.get(r["sentiment_label"], 0) + 1
+        side_counts[r["side_label"]] = side_counts.get(r["side_label"], 0) + 1
+        topic_counts[r["topic_title"]] = topic_counts.get(r["topic_title"], 0) + 1
+    top_sentiment = max(sentiment_counts, key=sentiment_counts.get)
+    top_side = max(side_counts, key=side_counts.get)
+    top_topic = max(topic_counts, key=topic_counts.get)
+    avg_score = sum(float(r["sentiment_score"] or 0) for r in rows) / max(1, len(rows))
+    brief = (
+        f"Window summary: {len(rows)} player-opinion records were captured. "
+        f"Dominant sentiment was '{top_sentiment}' with an average sentiment score of {avg_score:.2f}. "
+        f"The most represented argument side label was '{top_side}', and the top-discussed topic was '{top_topic}'. "
+        "Use side-level and topic-level sentiment deltas to identify messaging opportunities and customer concerns."
+    )
+    return jsonify({"brief": brief})
+
+
+@app.get("/api/admin/question-intelligence")
+def admin_question_intelligence():
+    err = _require_admin()
+    if err:
+        return err
+    conn = get_db()
+    where_sql, params = _admin_filter_args()
+    rows = conn.execute(
+        f"""
+        SELECT COALESCE(s.topic_title, t.title) AS topic,
+               s.side,
+               CASE WHEN s.side = 0 THEN t.side0_label ELSE t.side1_label END AS side_label,
+               COUNT(*) AS n,
+               AVG(s.sentiment_score) AS avg_sentiment
+        FROM debate_ai_summaries s
+        JOIN debates d ON d.id = s.debate_id
+        JOIN topics t ON t.day_key = d.topic_day_key
+        {where_sql}
+        GROUP BY topic, s.side, side_label
+        ORDER BY topic ASC, s.side ASC
+        """,
+        tuple(params),
+    ).fetchall()
+    grouped: dict[str, dict] = {}
+    for r in rows:
+        t = r["topic"]
+        if t not in grouped:
+            grouped[t] = {"topic": t, "total": 0, "sides": []}
+        grouped[t]["total"] += int(r["n"])
+        grouped[t]["sides"].append(
+            {
+                "side": r["side"],
+                "side_label": r["side_label"],
+                "count": int(r["n"]),
+                "avg_sentiment": round(float(r["avg_sentiment"] or 0), 3),
+            }
+        )
+    return jsonify({"topics": list(grouped.values())})
+
+
+@app.get("/api/admin/cohort-segments")
+def admin_cohort_segments():
+    err = _require_admin()
+    if err:
+        return err
+    conn = get_db()
+    where_sql, params = _admin_filter_args()
+    rows = conn.execute(
+        f"""
+        SELECT s.user_id, s.sentiment_score, u.rating, u.created_at
+        FROM debate_ai_summaries s
+        JOIN users u ON u.id = s.user_id
+        JOIN debates d ON d.id = s.debate_id
+        JOIN topics t ON t.day_key = d.topic_day_key
+        {where_sql}
+        """,
+        tuple(params),
+    ).fetchall()
+    def tier(rating: float) -> str:
+        return logic.tier_for_rating(float(rating or 1500.0))
+    by_tier: dict[str, dict] = {}
+    by_user_count: dict[int, int] = {}
+    for r in rows:
+        tr = tier(r["rating"])
+        if tr not in by_tier:
+            by_tier[tr] = {"tier": tr, "count": 0, "sentiment_total": 0.0}
+        by_tier[tr]["count"] += 1
+        by_tier[tr]["sentiment_total"] += float(r["sentiment_score"] or 0)
+        by_user_count[r["user_id"]] = by_user_count.get(r["user_id"], 0) + 1
+    tiers = [
+        {
+            "tier": k,
+            "count": v["count"],
+            "avg_sentiment": round(v["sentiment_total"] / max(1, v["count"]), 3),
+        }
+        for k, v in by_tier.items()
+    ]
+    new_users = sum(1 for _, c in by_user_count.items() if c == 1)
+    returning = sum(1 for _, c in by_user_count.items() if c > 1)
+    return jsonify({"tiers": tiers, "user_frequency": {"new": new_users, "returning": returning}})
+
+
+@app.get("/api/admin/toxicity-trends")
+def admin_toxicity_trends():
+    err = _require_admin()
+    if err:
+        return err
+    conn = get_db()
+    where_sql, params = _admin_filter_args()
+    rows = _admin_recent_rows(conn, where_sql, params)
+    by_flag: dict[str, int] = {}
+    by_day: dict[str, int] = {}
+    for r in rows:
+        day = str(r["created_at"])[:10]
+        flags = json.loads(r["toxicity_flags"] or "[]")
+        if flags:
+            by_day[day] = by_day.get(day, 0) + 1
+        for f in flags:
+            by_flag[f] = by_flag.get(f, 0) + 1
+    return jsonify(
+        {
+            "by_flag": [{"flag": k, "count": v} for k, v in sorted(by_flag.items(), key=lambda x: -x[1])],
+            "by_day": [{"day": k, "count": v} for k, v in sorted(by_day.items(), key=lambda x: x[0])],
+        }
+    )
+
+
+@app.get("/api/admin/debater-profiles")
+def admin_debater_profiles():
+    err = _require_admin()
+    if err:
+        return err
+    conn = get_db()
+    where_sql, params = _admin_filter_args()
+    rows = conn.execute(
+        f"""
+        SELECT s.user_id, u.handle, u.rating, u.wins, u.losses, s.sentiment_score, s.debate_id
+        FROM debate_ai_summaries s
+        JOIN users u ON u.id = s.user_id
+        JOIN debates d ON d.id = s.debate_id
+        JOIN topics t ON t.day_key = d.topic_day_key
+        {where_sql}
+        """,
+        tuple(params),
+    ).fetchall()
+    debate_votes = conn.execute(
+        """
+        SELECT id, user_a_id, user_b_id, side_a, judge_json
+        FROM debates
+        WHERE status='completed' AND verdict_status='ready' AND judge_json IS NOT NULL
+        """
+    ).fetchall()
+    margin_by_user: dict[int, list[float]] = {}
+    for d in debate_votes:
+        try:
+            j = json.loads(d["judge_json"] or "{}")
+            va = float(j.get("votes_side_a", 0))
+            vb = float(j.get("votes_side_b", 0))
+        except Exception:
+            continue
+        margin_a = va - vb
+        margin_b = vb - va
+        margin_by_user.setdefault(d["user_a_id"], []).append(margin_a)
+        margin_by_user.setdefault(d["user_b_id"], []).append(margin_b)
+    out: dict[int, dict] = {}
+    for r in rows:
+        uid = r["user_id"]
+        if uid not in out:
+            out[uid] = {
+                "user_id": uid,
+                "handle": r["handle"],
+                "rating": r["rating"],
+                "wins": r["wins"],
+                "losses": r["losses"],
+                "records": 0,
+                "sent_total": 0.0,
+            }
+        out[uid]["records"] += 1
+        out[uid]["sent_total"] += float(r["sentiment_score"] or 0)
+    profiles = []
+    for uid, p in out.items():
+        margins = margin_by_user.get(uid, [])
+        profiles.append(
+            {
+                "user_id": uid,
+                "handle": p["handle"],
+                "rating": p["rating"],
+                "wins": p["wins"],
+                "losses": p["losses"],
+                "records": p["records"],
+                "avg_sentiment": round(p["sent_total"] / max(1, p["records"]), 3),
+                "persuasion_delta": round(sum(margins) / max(1, len(margins)), 3),
+            }
+        )
+    profiles.sort(key=lambda x: (-x["records"], -x["rating"]))
+    return jsonify({"profiles": profiles[:50]})
+
+
+@app.get("/api/admin/experiments")
+def admin_experiments():
+    err = _require_admin()
+    if err:
+        return err
+    day_key = (request.args.get("day_key") or logic.day_key_from_dt()).strip()
+    conn = get_db()
+    rows = conn.execute(
+        """
+        SELECT day_key, variant, title, description, side0_label, side1_label, is_active, created_at
+        FROM topic_experiments
+        WHERE day_key = ?
+        ORDER BY variant ASC
+        """,
+        (day_key,),
+    ).fetchall()
+    return jsonify({"day_key": day_key, "variants": [dict(r) for r in rows]})
+
+
+@app.post("/api/admin/experiments")
+def admin_create_experiment():
+    err = _require_admin()
+    if err:
+        return err
+    data = request.get_json(silent=True) or {}
+    day_key = (data.get("day_key") or logic.day_key_from_dt()).strip()
+    variant = (data.get("variant") or "").strip().upper()
+    title = (data.get("title") or "").strip()
+    description = (data.get("description") or "").strip()
+    sides = data.get("sides") or []
+    if not re.match(r"^[A-Z0-9]{1,8}$", variant):
+        return _json_error(400, "Variant must be 1-8 chars (A-Z, 0-9).")
+    if len(sides) != 2:
+        return _json_error(400, "sides must contain exactly 2 labels.")
+    conn = get_db()
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO topic_experiments
+        (day_key, variant, title, description, side0_label, side1_label, is_active)
+        VALUES (?, ?, ?, ?, ?, ?, 1)
+        """,
+        (day_key, variant, title, description, str(sides[0]), str(sides[1])),
+    )
+    conn.commit()
+    return jsonify({"ok": True, "day_key": day_key, "variant": variant})
 
 
 def _admin_filter_args():

@@ -61,6 +61,10 @@
           <div class="kpi"><span class="muted">Messages (Opponent)</span><strong id="mOpp">0</strong></div>
           <div class="kpi"><span class="muted">Chars (You)</span><strong id="cMe">0</strong></div>
           <div class="kpi"><span class="muted">Chars (Opponent)</span><strong id="cOpp">0</strong></div>
+          <div class="kpi"><span class="muted">Avg Judge Confidence</span><strong id="avgConf">0</strong></div>
+          <div class="kpi"><span class="muted">Quality Score (Side A)</span><strong id="qA">0</strong></div>
+          <div class="kpi"><span class="muted">Quality Score (Side B)</span><strong id="qB">0</strong></div>
+          <div class="kpi"><span class="muted">Decision Type</span><strong id="dType">-</strong></div>
         </div>
         <h3 style="margin-top:.9rem;">Debate Topic</h3>
         <p id="topic"></p>
@@ -97,6 +101,10 @@
           document.getElementById("voteA").style.width = "50%";
           document.getElementById("voteB").style.width = "50%";
           document.getElementById("judgeList").innerHTML = '<p class="muted">No judge breakdown available yet.</p>';
+          document.getElementById("avgConf").textContent = "-";
+          document.getElementById("qA").textContent = "-";
+          document.getElementById("qB").textContent = "-";
+          document.getElementById("dType").textContent = "pending";
           return;
         }
         var won = payload.winner_user_id === UID;
@@ -112,9 +120,14 @@
         document.getElementById("voteCount").textContent = a + " - " + b;
         document.getElementById("voteA").style.width = ((a / total) * 100).toFixed(1) + "%";
         document.getElementById("voteB").style.width = ((b / total) * 100).toFixed(1) + "%";
+        var quality = payload.verdict.quality || {};
+        document.getElementById("avgConf").textContent = Number(quality.avg_confidence || 0).toFixed(2);
+        document.getElementById("qA").textContent = Number(quality.avg_score_a || 0).toFixed(1);
+        document.getElementById("qB").textContent = Number(quality.avg_score_b || 0).toFixed(1);
+        document.getElementById("dType").textContent = String(payload.verdict.decision_type || "panel_vote");
         var html = "";
         (payload.verdict.personas || []).forEach(function (p) {
-          html += '<div class="judge"><strong>' + esc(p.name) + '</strong><div class="muted">' + esc(p.reason || "") + "</div></div>";
+          html += '<div class="judge"><strong>' + esc(p.name) + '</strong><div class="muted">' + esc(p.reason || "") + '</div><div class="muted">Confidence: ' + Number(p.confidence || 0).toFixed(2) + " | Scores A/B: " + Number(p.score_a || 0) + "/" + Number(p.score_b || 0) + "</div></div>";
         });
         document.getElementById("judgeList").innerHTML = html || '<p class="muted">No judge notes available.</p>';
       }

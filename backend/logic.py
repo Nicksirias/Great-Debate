@@ -116,6 +116,42 @@ def ensure_topic_row(conn, day_key: str) -> None:
     )
 
 
+def topic_for_user(conn, day_key: str, user_id: int | None = None) -> dict[str, Any]:
+    ensure_topic_row(conn, day_key)
+    base = conn.execute("SELECT * FROM topics WHERE day_key = ?", (day_key,)).fetchone()
+    if user_id is None:
+        return {
+            "variant": "A",
+            "title": base["title"],
+            "description": base["description"],
+            "sides": [base["side0_label"], base["side1_label"]],
+        }
+    variants = conn.execute(
+        """
+        SELECT variant, title, description, side0_label, side1_label
+        FROM topic_experiments
+        WHERE day_key = ? AND is_active = 1
+        ORDER BY variant ASC
+        """,
+        (day_key,),
+    ).fetchall()
+    if not variants:
+        return {
+            "variant": "A",
+            "title": base["title"],
+            "description": base["description"],
+            "sides": [base["side0_label"], base["side1_label"]],
+        }
+    idx = abs(hash((day_key, user_id))) % len(variants)
+    v = variants[idx]
+    return {
+        "variant": v["variant"],
+        "title": v["title"],
+        "description": v["description"],
+        "sides": [v["side0_label"], v["side1_label"]],
+    }
+
+
 def elo_expected(ra: float, rb: float) -> float:
     return 1.0 / (1.0 + 10 ** ((rb - ra) / 400.0))
 
@@ -355,6 +391,7 @@ def judge_transcript(
             "personas": [],
             "decision_type": "auto_forfeit",
             "moderation": moderation,
+            "quality": {"avg_score_a": 0.0, "avg_score_b": 0.0, "avg_confidence": 1.0},
             "analytics": _summarize_positions(
                 transcript, user_a_id, user_b_id, handle_a, handle_b, side_a
             ),
@@ -395,8 +432,14 @@ def judge_transcript(
                 "favored_handle": favored_handle,
                 "favored_user_id": j["favored_user_id"],
                 "reason": j["reason"],
+                "confidence": round(float(j["confidence"]), 3),
+                "score_a": int(j["score_a"]),
+                "score_b": int(j["score_b"]),
             }
         )
+    avg_score_a = sum(int(j["score_a"]) for j in judge_outputs) / max(1, len(judge_outputs))
+    avg_score_b = sum(int(j["score_b"]) for j in judge_outputs) / max(1, len(judge_outputs))
+    avg_confidence = sum(float(j["confidence"]) for j in judge_outputs) / max(1, len(judge_outputs))
 
     return {
         "winner_user_id": winner_id,
@@ -407,30 +450,26 @@ def judge_transcript(
         "personas": personas,
         "decision_type": "panel_vote",
         "moderation": {"auto_loss": False},
+        "quality": {
+            "avg_score_a": round(avg_score_a, 2),
+            "avg_score_b": round(avg_score_b, 2),
+            "avg_confidence": round(avg_confidence, 3),
+        },
         "analytics": analytics,
     }
 
 
-def finalize_debate(conn, debate_id: int) -> dict[str, Any]:
-    row = conn.execute(
-        """
-        SELECT d.*, ua.handle AS ha, ub.handle AS hb, t.side0_label, t.side1_label, t.title AS topic_title
-        FROM debates d
-        JOIN users ua ON ua.id = d.user_a_id
-        JOIN users ub ON ub.id = d.user_b_id
-        JOIN topics t ON t.day_key = d.topic_day_key
-        WHERE d.id = ? AND d.status = 'active'
-        """,
-        (debate_id,),
-    ).fetchone()
-    if not row:
-        return {"ok": False, "reason": "not_active"}
-
+def _finalize_from_row(conn, row) -> dict[str, Any]:
+    debate_id = row["id"]
+    status = row["status"]
+    if status not in ("active", "completed"):
+        return {"ok": False, "reason": "not_finalizable"}
+    if status == "completed" and (row["verdict_status"] or "") != "pending":
+        return {"ok": False, "reason": "already_completed"}
     msgs = conn.execute(
         "SELECT user_id, body FROM messages WHERE debate_id = ? ORDER BY id ASC",
         (debate_id,),
     ).fetchall()
-
     now = utc_now().isoformat()
     try:
         verdict = judge_transcript(
@@ -493,7 +532,7 @@ def finalize_debate(conn, debate_id: int) -> dict[str, Any]:
             """
             UPDATE debates
             SET status = 'completed',
-                ended_at = ?,
+                ended_at = COALESCE(ended_at, ?),
                 winner_user_id = NULL,
                 judge_json = ?,
                 verdict_status = 'pending',
@@ -506,22 +545,56 @@ def finalize_debate(conn, debate_id: int) -> dict[str, Any]:
         return {"ok": False, "status": "pending", "error": str(exc)}
 
 
-def try_match_queue(conn, user_id: int, day_key: str, side: int) -> int | None:
+def finalize_debate(conn, debate_id: int) -> dict[str, Any]:
+    row = conn.execute(
+        """
+        SELECT d.*, ua.handle AS ha, ub.handle AS hb, t.side0_label, t.side1_label, t.title AS topic_title
+        FROM debates d
+        JOIN users ua ON ua.id = d.user_a_id
+        JOIN users ub ON ub.id = d.user_b_id
+        JOIN topics t ON t.day_key = d.topic_day_key
+        WHERE d.id = ? AND d.status = 'active'
+        """,
+        (debate_id,),
+    ).fetchone()
+    if not row:
+        return {"ok": False, "reason": "not_active"}
+    return _finalize_from_row(conn, row)
+
+
+def retry_pending_debate(conn, debate_id: int) -> dict[str, Any]:
+    row = conn.execute(
+        """
+        SELECT d.*, ua.handle AS ha, ub.handle AS hb, t.side0_label, t.side1_label, t.title AS topic_title
+        FROM debates d
+        JOIN users ua ON ua.id = d.user_a_id
+        JOIN users ub ON ub.id = d.user_b_id
+        JOIN topics t ON t.day_key = d.topic_day_key
+        WHERE d.id = ? AND d.status = 'completed' AND d.verdict_status = 'pending'
+        """,
+        (debate_id,),
+    ).fetchone()
+    if not row:
+        return {"ok": False, "reason": "not_pending"}
+    return _finalize_from_row(conn, row)
+
+
+def try_match_queue(conn, user_id: int, day_key: str, side: int, topic_variant: str = "A") -> int | None:
     """Pair with longest-waiting opponent on opposite side. Returns debate_id or None."""
     ensure_topic_row(conn, day_key)
     conn.execute("DELETE FROM queue_entries WHERE user_id = ?", (user_id,))
     conn.execute(
-        "INSERT INTO queue_entries (user_id, day_key, side) VALUES (?, ?, ?)",
-        (user_id, day_key, side),
+        "INSERT INTO queue_entries (user_id, day_key, topic_variant, side) VALUES (?, ?, ?, ?)",
+        (user_id, day_key, topic_variant, side),
     )
 
     opp = conn.execute(
         """
         SELECT user_id FROM queue_entries
-        WHERE day_key = ? AND side != ? AND user_id != ?
+        WHERE day_key = ? AND topic_variant = ? AND side != ? AND user_id != ?
         ORDER BY created_at ASC LIMIT 1
         """,
-        (day_key, side, user_id),
+        (day_key, topic_variant, side, user_id),
     ).fetchone()
 
     if not opp:
@@ -543,10 +616,10 @@ def try_match_queue(conn, user_id: int, day_key: str, side: int) -> int | None:
     cur = conn.execute(
         """
         INSERT INTO debates (
-            topic_day_key, user_a_id, user_b_id, side_a, status, ends_at, last_activity_at
-        ) VALUES (?, ?, ?, ?, 'active', ?, ?)
+            topic_day_key, topic_variant, user_a_id, user_b_id, side_a, status, ends_at, last_activity_at
+        ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)
         """,
-        (day_key, ua, ub, sa, ends, last),
+        (day_key, topic_variant, ua, ub, sa, ends, last),
     )
     debate_id = cur.lastrowid
     conn.execute("DELETE FROM queue_entries WHERE user_id IN (?, ?)", (user_id, opp_id))

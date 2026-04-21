@@ -44,8 +44,29 @@
       <div class="row" style="margin-top:.6rem;">
         <button id="loadBtn" type="button">Apply filters</button>
         <button id="exportBtn" class="ghost" type="button">Export Excel</button>
+        <button id="retryBtn" class="ghost" type="button">Retry Pending Judgments</button>
       </div>
       <p class="muted" id="status">Apply filters to load analytics.</p>
+    </div>
+    <div class="card">
+      <h2>Topic Experiment Mode (A/B)</h2>
+      <div class="row">
+        <input id="expDay" type="date" />
+        <input id="expVariant" type="text" placeholder="Variant code (e.g. B)" style="max-width:160px;" />
+        <input id="expTitle" type="text" placeholder="Variant title" style="min-width:260px;" />
+      </div>
+      <div class="row" style="margin-top:.5rem;">
+        <input id="expDesc" type="text" placeholder="Variant description" style="min-width:420px;" />
+      </div>
+      <div class="row" style="margin-top:.5rem;">
+        <input id="expSide0" type="text" placeholder="Side 0 label" style="min-width:260px;" />
+        <input id="expSide1" type="text" placeholder="Side 1 label" style="min-width:260px;" />
+      </div>
+      <div class="row" style="margin-top:.6rem;">
+        <button id="saveExpBtn" type="button">Save Variant</button>
+        <button id="loadExpBtn" class="ghost" type="button">Load Day Variants</button>
+      </div>
+      <div id="expRows" class="muted" style="margin-top:.55rem;">No variants loaded.</div>
     </div>
 
     <div class="card">
@@ -64,6 +85,14 @@
     <div class="grid">
       <div class="card"><h2>Daily Activity Trend</h2><div id="dailyBars"></div></div>
       <div class="card"><h2>Side Position Insights</h2><div id="sideBars"></div></div>
+    </div>
+    <div class="grid">
+      <div class="card"><h2>Cohort Segmentation</h2><div id="cohortBars"></div><div id="freqMix" class="muted"></div></div>
+      <div class="card"><h2>Toxicity Guardrails</h2><div id="toxBars"></div><div id="toxDays"></div></div>
+    </div>
+    <div class="grid">
+      <div class="card"><h2>Question Intelligence</h2><div id="questionIntel"></div></div>
+      <div class="card"><h2>Weekly Insight Brief</h2><p id="brief" class="muted">Load analytics to generate a brief.</p></div>
     </div>
     <div class="grid">
       <div class="card"><h2>Why this is useful</h2>
@@ -89,6 +118,17 @@
         </table>
       </div>
     </div>
+    <div class="card">
+      <h2>Top Debater Profiles</h2>
+      <div style="overflow:auto;">
+        <table>
+          <thead>
+            <tr><th>Handle</th><th>Rating</th><th>W/L</th><th>Records</th><th>Avg sentiment</th><th>Persuasion delta</th></tr>
+          </thead>
+          <tbody id="profiles"></tbody>
+        </table>
+      </div>
+    </div>
   </div>
   <script>
     (function () {
@@ -99,6 +139,8 @@
       var topicInput = document.getElementById("topicInput");
       var status = document.getElementById("status");
       var rows = document.getElementById("rows");
+      var profiles = document.getElementById("profiles");
+      var expRows = document.getElementById("expRows");
       function esc(s) { var d = document.createElement("div"); d.textContent = s || ""; return d.innerHTML; }
       function q() {
         var p = new URLSearchParams();
@@ -143,9 +185,23 @@
         var token = tokenInput.value.trim();
         if (!token) { status.textContent = "Admin token required."; return; }
         status.textContent = "Loading analytics...";
-        fetch("/api/admin/sentiment?" + q(), { headers: { "X-Admin-Token": token } })
-          .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || "Failed"); return d; }); })
-          .then(function (data) {
+        var qs = q();
+        var h = { "X-Admin-Token": token };
+        Promise.all([
+          fetch("/api/admin/sentiment?" + qs, { headers: h }).then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || "Failed"); return d; }); }),
+          fetch("/api/admin/cohort-segments?" + qs, { headers: h }).then(function (r) { return r.json(); }),
+          fetch("/api/admin/toxicity-trends?" + qs, { headers: h }).then(function (r) { return r.json(); }),
+          fetch("/api/admin/question-intelligence?" + qs, { headers: h }).then(function (r) { return r.json(); }),
+          fetch("/api/admin/insight-brief?" + qs, { headers: h }).then(function (r) { return r.json(); }),
+          fetch("/api/admin/debater-profiles?" + qs, { headers: h }).then(function (r) { return r.json(); })
+        ])
+          .then(function (allData) {
+            var data = allData[0];
+            var cohorts = allData[1] || {};
+            var tox = allData[2] || {};
+            var intel = allData[3] || {};
+            var briefData = allData[4] || {};
+            var profileData = allData[5] || {};
             status.textContent = "Loaded.";
             document.getElementById("kRecords").textContent = String((data.kpis && data.kpis.records) || 0);
             document.getElementById("kSweep").textContent = String((data.kpis && data.kpis.sweep_rate) || 0) + "%";
@@ -155,6 +211,32 @@
             renderBars(document.getElementById("topicBars"), data.topics || [], "topic", "count", function (x) { return "avg sentiment " + Number(x.avg_sentiment || 0).toFixed(2); });
             renderBars(document.getElementById("dailyBars"), data.daily || [], "day", "count", function (x) { return "avg " + Number(x.avg_sentiment || 0).toFixed(2); });
             renderBars(document.getElementById("sideBars"), data.sides || [], "side_label", "count", function (x) { return "side " + x.side + " | avg " + Number(x.avg_sentiment || 0).toFixed(2); });
+            renderBars(document.getElementById("cohortBars"), cohorts.tiers || [], "tier", "count", function (x) { return "avg " + Number(x.avg_sentiment || 0).toFixed(2); });
+            var freq = cohorts.user_frequency || {};
+            document.getElementById("freqMix").textContent = "New users: " + (freq.new || 0) + " | Returning: " + (freq.returning || 0);
+            renderBars(document.getElementById("toxBars"), tox.by_flag || [], "flag", "count");
+            renderBars(document.getElementById("toxDays"), tox.by_day || [], "day", "count");
+            var topics = intel.topics || [];
+            if (!topics.length) {
+              document.getElementById("questionIntel").innerHTML = '<p class="muted">No topic intelligence rows for this filter.</p>';
+            } else {
+              document.getElementById("questionIntel").innerHTML = topics.map(function (t) {
+                var sideText = (t.sides || []).map(function (s) {
+                  return s.side_label + ": " + s.count + " (avg " + Number(s.avg_sentiment || 0).toFixed(2) + ")";
+                }).join(" | ");
+                return '<div class="bar" style="height:auto;padding:.45rem .55rem;"><strong>' + esc(t.topic) + '</strong><div class="muted">' + esc(sideText) + "</div></div>";
+              }).join("");
+            }
+            document.getElementById("brief").textContent = briefData.brief || "No brief available.";
+            profiles.innerHTML = "";
+            (profileData.profiles || []).forEach(function (p) {
+              var tr = document.createElement("tr");
+              tr.innerHTML = "<td>@" + esc(p.handle) + "</td><td>" + Number(p.rating || 0).toFixed(0) + "</td><td>" + p.wins + "/" + p.losses + "</td><td>" + p.records + "</td><td>" + Number(p.avg_sentiment || 0).toFixed(2) + "</td><td>" + Number(p.persuasion_delta || 0).toFixed(2) + "</td>";
+              profiles.appendChild(tr);
+            });
+            if (!(profileData.profiles || []).length) {
+              profiles.innerHTML = '<tr><td colspan="6" class="muted">No profile rows in filter window.</td></tr>';
+            }
             renderTable(data.recent || []);
           })
           .catch(function (e) { status.textContent = e.message || "Failed to load analytics."; });
@@ -165,6 +247,61 @@
         if (!token) { status.textContent = "Admin token required for export."; return; }
         var url = "/api/admin/sentiment/export.xlsx?" + q() + (q() ? "&" : "") + "token=" + encodeURIComponent(token);
         window.location.href = url;
+      });
+      document.getElementById("retryBtn").addEventListener("click", function () {
+        var token = tokenInput.value.trim();
+        if (!token) { status.textContent = "Admin token required."; return; }
+        fetch("/api/admin/retry-pending?limit=20", { method: "POST", headers: { "X-Admin-Token": token } })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            status.textContent = "Retried " + (d.retried || 0) + " pending debates; succeeded " + (d.succeeded || 0) + ".";
+            loadData();
+          })
+          .catch(function () { status.textContent = "Could not retry pending judgments."; });
+      });
+      function selectedDay() {
+        var v = (document.getElementById("expDay").value || "").trim();
+        if (v) return v;
+        return new Date().toISOString().slice(0, 10);
+      }
+      document.getElementById("loadExpBtn").addEventListener("click", function () {
+        var token = tokenInput.value.trim();
+        if (!token) { status.textContent = "Admin token required."; return; }
+        fetch("/api/admin/experiments?day_key=" + encodeURIComponent(selectedDay()), { headers: { "X-Admin-Token": token } })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            var list = d.variants || [];
+            if (!list.length) { expRows.textContent = "No variants for " + d.day_key + "."; return; }
+            expRows.innerHTML = list.map(function (x) {
+              return "<div><strong>" + esc(x.variant) + "</strong>: " + esc(x.title) + " | " + esc(x.side0_label) + " vs " + esc(x.side1_label) + "</div>";
+            }).join("");
+          })
+          .catch(function () { expRows.textContent = "Failed to load variants."; });
+      });
+      document.getElementById("saveExpBtn").addEventListener("click", function () {
+        var token = tokenInput.value.trim();
+        if (!token) { status.textContent = "Admin token required."; return; }
+        var body = {
+          day_key: selectedDay(),
+          variant: (document.getElementById("expVariant").value || "").trim(),
+          title: (document.getElementById("expTitle").value || "").trim(),
+          description: (document.getElementById("expDesc").value || "").trim(),
+          sides: [
+            (document.getElementById("expSide0").value || "").trim(),
+            (document.getElementById("expSide1").value || "").trim()
+          ]
+        };
+        fetch("/api/admin/experiments", {
+          method: "POST",
+          headers: { "X-Admin-Token": token, "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        })
+          .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || "Failed to save."); return d; }); })
+          .then(function () {
+            status.textContent = "Experiment variant saved.";
+            document.getElementById("loadExpBtn").click();
+          })
+          .catch(function (e) { status.textContent = e.message || "Could not save variant."; });
       });
     })();
   </script>

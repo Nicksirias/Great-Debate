@@ -59,6 +59,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS debates (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             topic_day_key TEXT NOT NULL,
+            topic_variant TEXT NOT NULL DEFAULT 'A',
             user_a_id INTEGER NOT NULL,
             user_b_id INTEGER NOT NULL,
             side_a INTEGER NOT NULL,
@@ -88,6 +89,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS queue_entries (
             user_id INTEGER PRIMARY KEY,
             day_key TEXT NOT NULL,
+            topic_variant TEXT NOT NULL DEFAULT 'A',
             side INTEGER NOT NULL,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             FOREIGN KEY (user_id) REFERENCES users(id)
@@ -107,6 +109,19 @@ def init_db():
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             FOREIGN KEY (debate_id) REFERENCES debates(id),
             FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS topic_experiments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            day_key TEXT NOT NULL,
+            variant TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            side0_label TEXT NOT NULL,
+            side1_label TEXT NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(day_key, variant)
         );
 
         CREATE INDEX IF NOT EXISTS idx_debates_users ON debates(user_a_id, user_b_id);
@@ -131,6 +146,10 @@ def _migrate_schema(conn) -> None:
         conn.execute("ALTER TABLE debates ADD COLUMN verdict_status TEXT NOT NULL DEFAULT 'ready'")
     if not _has_column(conn, "debates", "judge_error"):
         conn.execute("ALTER TABLE debates ADD COLUMN judge_error TEXT")
+    if not _has_column(conn, "debates", "topic_variant"):
+        conn.execute("ALTER TABLE debates ADD COLUMN topic_variant TEXT NOT NULL DEFAULT 'A'")
+    if not _has_column(conn, "queue_entries", "topic_variant"):
+        conn.execute("ALTER TABLE queue_entries ADD COLUMN topic_variant TEXT NOT NULL DEFAULT 'A'")
     if not _has_column(conn, "debate_ai_summaries", "topic_day_key"):
         conn.execute("ALTER TABLE debate_ai_summaries ADD COLUMN topic_day_key TEXT")
     if not _has_column(conn, "debate_ai_summaries", "topic_title"):
