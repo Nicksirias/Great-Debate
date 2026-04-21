@@ -286,8 +286,8 @@ Return strict JSON with keys:
 - favored_user_id (integer, {user_a_id} or {user_b_id})
 - confidence (number from 0 to 1)
 - reason (string, max 220 chars)
-- score_a (integer 0-100)
-- score_b (integer 0-100)
+- score_user_a (integer 0-100, this is ONLY for @{handle_a}, user_id {user_a_id})
+- score_user_b (integer 0-100, this is ONLY for @{handle_b}, user_id {user_b_id})
 
 Debate sides:
 - Side A: {side0_label}
@@ -304,13 +304,17 @@ Transcript:
     favored = result.get("favored_user_id")
     if favored not in (user_a_id, user_b_id):
         raise ValueError(f"Invalid judge vote from {profile['name']}")
+    score_a = int(result.get("score_user_a", 50))
+    score_b = int(result.get("score_user_b", 50))
+    score_a = max(0, min(100, score_a))
+    score_b = max(0, min(100, score_b))
     return {
         "name": profile["name"],
         "favored_user_id": favored,
         "reason": str(result.get("reason", "")).strip() or "Preferred argumentative performance.",
         "confidence": float(result.get("confidence", 0.5)),
-        "score_a": int(result.get("score_a", 50)),
-        "score_b": int(result.get("score_b", 50)),
+        "score_a": score_a,
+        "score_b": score_b,
     }
 
 

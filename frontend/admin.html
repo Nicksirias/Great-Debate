@@ -32,10 +32,10 @@
       <div class="row">
         <label>Admin token</label>
         <input id="tokenInput" type="password" placeholder="ADMIN_TOKEN" />
-        <label>Start</label>
-        <input id="startInput" type="datetime-local" />
-        <label>End</label>
-        <input id="endInput" type="datetime-local" />
+        <label>Start date</label>
+        <input id="startInput" type="date" />
+        <label>End date</label>
+        <input id="endInput" type="date" />
         <label>Side</label>
         <select id="sideInput"><option value="">All</option><option value="0">Side 0</option><option value="1">Side 1</option></select>
         <label>Topic contains</label>
@@ -46,7 +46,7 @@
         <button id="exportBtn" class="ghost" type="button">Export Excel</button>
         <button id="retryBtn" class="ghost" type="button">Retry Pending Judgments</button>
       </div>
-      <p class="muted" id="status">Apply filters to load analytics.</p>
+      <p class="muted" id="status"></p>
     </div>
     <div class="card">
       <h2>Topic Experiment Mode (A/B)</h2>
@@ -141,11 +141,12 @@
       var rows = document.getElementById("rows");
       var profiles = document.getElementById("profiles");
       var expRows = document.getElementById("expRows");
+      var ADMIN_TOKEN_KEY = "gb_admin_token";
       function esc(s) { var d = document.createElement("div"); d.textContent = s || ""; return d.innerHTML; }
       function q() {
         var p = new URLSearchParams();
-        if (startInput.value) p.set("start", startInput.value.replace("T", " "));
-        if (endInput.value) p.set("end", endInput.value.replace("T", " "));
+        if (startInput.value) p.set("start", startInput.value);
+        if (endInput.value) p.set("end", endInput.value);
         if (sideInput.value) p.set("side", sideInput.value);
         if (topicInput.value.trim()) p.set("topic", topicInput.value.trim());
         return p.toString();
@@ -184,6 +185,7 @@
       function loadData() {
         var token = tokenInput.value.trim();
         if (!token) { status.textContent = "Admin token required."; return; }
+        localStorage.setItem(ADMIN_TOKEN_KEY, token);
         status.textContent = "Loading analytics...";
         var qs = q();
         var h = { "X-Admin-Token": token };
@@ -303,6 +305,13 @@
           })
           .catch(function (e) { status.textContent = e.message || "Could not save variant."; });
       });
+      var savedToken = localStorage.getItem(ADMIN_TOKEN_KEY);
+      if (savedToken) {
+        tokenInput.value = savedToken;
+      }
+      if (tokenInput.value.trim()) {
+        loadData();
+      }
     })();
   </script>
 </body>

@@ -710,10 +710,10 @@ def _admin_filter_args():
     where = []
     params = []
     if start:
-        where.append("s.created_at >= ?")
+        where.append("date(s.created_at) >= date(?)")
         params.append(start)
     if end:
-        where.append("s.created_at <= ?")
+        where.append("date(s.created_at) <= date(?)")
         params.append(end)
     if topic:
         where.append("LOWER(COALESCE(s.topic_title, t.title)) LIKE ?")
