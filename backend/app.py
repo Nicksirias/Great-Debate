@@ -895,6 +895,21 @@ def admin_sentiment():
         """,
         tuple(params),
     ).fetchall()
+    topic_side = conn.execute(
+        f"""
+        SELECT COALESCE(s.topic_title, t.title) AS topic,
+               s.side,
+               COUNT(*) AS n,
+               AVG(s.sentiment_score) AS avg_sentiment
+        FROM debate_ai_summaries s
+        JOIN debates d ON d.id = s.debate_id
+        JOIN topics t ON t.day_key = d.topic_day_key
+        {where_sql}
+        GROUP BY topic, s.side
+        ORDER BY topic ASC, s.side ASC
+        """,
+        tuple(params),
+    ).fetchall()
     daily = conn.execute(
         f"""
         SELECT substr(s.created_at, 1, 10) AS day, COUNT(*) AS n, AVG(s.sentiment_score) AS avg_sentiment
@@ -932,6 +947,47 @@ def admin_sentiment():
         ,
         tuple(params),
     ).fetchone()
+    totals = conn.execute(
+        f"""
+        SELECT COUNT(*) AS total_rows,
+               COUNT(DISTINCT s.user_id) AS unique_users,
+               AVG(ABS(s.sentiment_score)) AS avg_intensity,
+               SUM(CASE WHEN COALESCE(s.toxicity_flags, '[]') != '[]' THEN 1 ELSE 0 END) AS toxic_rows
+        FROM debate_ai_summaries s
+        JOIN debates d ON d.id = s.debate_id
+        JOIN topics t ON t.day_key = d.topic_day_key
+        {where_sql}
+        """,
+        tuple(params),
+    ).fetchone()
+    by_topic: dict[str, dict] = {}
+    for r in topic_side:
+        t = r["topic"]
+        by_topic.setdefault(t, {})
+        by_topic[t][int(r["side"])] = {"count": int(r["n"]), "avg": float(r["avg_sentiment"] or 0)}
+    topic_insights = []
+    for topic_name, sdata in by_topic.items():
+        c0 = sdata.get(0, {}).get("count", 0)
+        c1 = sdata.get(1, {}).get("count", 0)
+        a0 = sdata.get(0, {}).get("avg", 0.0)
+        a1 = sdata.get(1, {}).get("avg", 0.0)
+        total = c0 + c1
+        if total == 0:
+            continue
+        balance = 1.0 - abs(c0 - c1) / total
+        polarity_gap = abs(a0 - a1)
+        controversy = round((balance * 0.6 + min(1.0, polarity_gap) * 0.4) * 100.0, 2)
+        topic_insights.append(
+            {
+                "topic": topic_name,
+                "side0_count": c0,
+                "side1_count": c1,
+                "side0_avg_sentiment": round(a0, 3),
+                "side1_avg_sentiment": round(a1, 3),
+                "controversy_score": controversy,
+            }
+        )
+    topic_insights.sort(key=lambda x: (-x["controversy_score"], -(x["side0_count"] + x["side1_count"])))
     return jsonify(
         {
             "counts": [{"sentiment": r["sentiment_label"], "count": r["n"]} for r in rows],
@@ -957,7 +1013,13 @@ def admin_sentiment():
                 "sweep_rate": round(
                     (float(sweep["sweep_count"] or 0) / float(sweep["judged_count"] or 1)) * 100.0, 2
                 ),
+                "unique_users": int(totals["unique_users"] or 0),
+                "avg_intensity": round(float(totals["avg_intensity"] or 0), 3),
+                "toxicity_rate": round(
+                    (float(totals["toxic_rows"] or 0) / float(totals["total_rows"] or 1)) * 100.0, 2
+                ),
             },
+            "topic_insights": topic_insights[:12],
             "recent": [
                 {
                     "debate_id": r["debate_id"],
@@ -1219,6 +1281,39 @@ def fake_admin_sentiment():
         ],
         key=lambda x: -x["count"],
     )
+    by_topic = {}
+    for r in rows:
+        t = r["topic_title"]
+        by_topic.setdefault(t, {})
+        by_topic[t].setdefault(r["side"], {"count": 0, "sum": 0.0})
+        by_topic[t][r["side"]]["count"] += 1
+        by_topic[t][r["side"]]["sum"] += float(r["sentiment_score"])
+    topic_insights = []
+    for topic_name, sdata in by_topic.items():
+        c0 = sdata.get(0, {}).get("count", 0)
+        c1 = sdata.get(1, {}).get("count", 0)
+        a0 = (sdata.get(0, {}).get("sum", 0.0) / c0) if c0 else 0.0
+        a1 = (sdata.get(1, {}).get("sum", 0.0) / c1) if c1 else 0.0
+        total = c0 + c1
+        if not total:
+            continue
+        balance = 1.0 - abs(c0 - c1) / total
+        polarity_gap = abs(a0 - a1)
+        controversy = round((balance * 0.6 + min(1.0, polarity_gap) * 0.4) * 100.0, 2)
+        topic_insights.append(
+            {
+                "topic": topic_name,
+                "side0_count": c0,
+                "side1_count": c1,
+                "side0_avg_sentiment": round(a0, 3),
+                "side1_avg_sentiment": round(a1, 3),
+                "controversy_score": controversy,
+            }
+        )
+    topic_insights.sort(key=lambda x: (-x["controversy_score"], -(x["side0_count"] + x["side1_count"])))
+    unique_users = len({r["user_id"] for r in rows})
+    toxicity_rows = sum(1 for r in rows if r["toxicity_flags"])
+    avg_intensity = sum(abs(float(r["sentiment_score"])) for r in rows) / max(1, len(rows))
     return jsonify(
         {
             "counts": [{"sentiment": k, "count": v} for k, v in sorted(counts.items(), key=lambda x: -x[1])],
@@ -1228,7 +1323,11 @@ def fake_admin_sentiment():
             "kpis": {
                 "records": len(rows),
                 "sweep_rate": round((sweep_count / judged_count) * 100.0, 2),
+                "unique_users": unique_users,
+                "avg_intensity": round(avg_intensity, 3),
+                "toxicity_rate": round((toxicity_rows / max(1, len(rows))) * 100.0, 2),
             },
+            "topic_insights": topic_insights[:12],
             "recent": sorted(rows, key=lambda x: x["created_at"], reverse=True)[:300],
         }
     )

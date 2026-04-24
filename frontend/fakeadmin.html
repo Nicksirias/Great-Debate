@@ -4,17 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Great Debate Fake Admin</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    body { font-family: Inter, system-ui, sans-serif; margin: 0; background: #0b1020; color: #eef2ff; }
+    body { font-family: Inter, system-ui, sans-serif; margin: 0; background: radial-gradient(1000px 600px at 12% -10%, rgba(127,109,255,.22), transparent 55%), #0b1020; color: #eef2ff; }
     .wrap { width: min(1180px, 95vw); margin: 0 auto; padding: 1rem 0 2rem; }
-    .card { border: 1px solid rgba(255,255,255,.15); border-radius: 12px; background: rgba(255,255,255,.04); padding: 1rem; margin-bottom: .9rem; }
+    .card { border: 1px solid rgba(255,255,255,.15); border-radius: 12px; background: rgba(255,255,255,.04); backdrop-filter: blur(6px); padding: 1rem; margin-bottom: .9rem; }
     .row { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; }
     input, select, button { font: inherit; border-radius: 8px; padding: .45rem .6rem; }
     input, select { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.2); color: #fff; }
     button { border: 0; background: #7163ff; color: #fff; cursor: pointer; }
     .ghost { background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.2); }
     .grid { display:grid; gap:.8rem; grid-template-columns: 1fr 1fr; }
-    .kpis { display:grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: .6rem; }
+    .kpis { display:grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: .6rem; }
     .kpi { border: 1px solid rgba(255,255,255,.15); border-radius: 10px; padding: .6rem; }
     .kpi strong { display:block; font-size: 1.12rem; }
     .muted { color: #b6bedf; }
@@ -22,7 +23,8 @@
     th, td { border-bottom: 1px solid rgba(255,255,255,.12); text-align: left; padding: .52rem .3rem; vertical-align: top; }
     .bar { height: 22px; background: rgba(255,255,255,.08); border-radius: 7px; overflow: hidden; margin: .35rem 0; }
     .bar > span { display:block; height:100%; background: linear-gradient(100deg,#7f6dff,#2de8b0); }
-    @media (max-width: 930px) { .grid { grid-template-columns: 1fr; } .kpis { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+    .chart-wrap { height: 260px; }
+    @media (max-width: 930px) { .grid { grid-template-columns: 1fr; } .kpis { grid-template-columns: repeat(2,minmax(0,1fr)); } .chart-wrap { height: 220px; } }
   </style>
 </head>
 <body>
@@ -73,15 +75,17 @@
         <div class="kpi"><span class="muted">Estimated sweep rate</span><strong id="kSweep">0%</strong></div>
         <div class="kpi"><span class="muted">Distinct topics</span><strong id="kTopics">0</strong></div>
         <div class="kpi"><span class="muted">Daily points</span><strong id="kDays">0</strong></div>
+        <div class="kpi"><span class="muted">Unique users</span><strong id="kUsers">0</strong></div>
+        <div class="kpi"><span class="muted">Toxicity rate</span><strong id="kTox">0%</strong></div>
       </div>
     </div>
     <div class="grid">
-      <div class="card"><h2>Sentiment Mix</h2><div id="sentimentBars"></div></div>
-      <div class="card"><h2>Top Topics by Volume</h2><div id="topicBars"></div></div>
+      <div class="card"><h2>Sentiment Mix</h2><div class="chart-wrap"><canvas id="sentimentChart"></canvas></div></div>
+      <div class="card"><h2>Top Topics by Volume</h2><div class="chart-wrap"><canvas id="topicChart"></canvas></div></div>
     </div>
     <div class="grid">
-      <div class="card"><h2>Daily Activity Trend</h2><div id="dailyBars"></div></div>
-      <div class="card"><h2>Side Position Insights</h2><div id="sideBars"></div></div>
+      <div class="card"><h2>Daily Activity Trend</h2><div class="chart-wrap"><canvas id="dailyChart"></canvas></div></div>
+      <div class="card"><h2>Side Position Insights</h2><div class="chart-wrap"><canvas id="sideChart"></canvas></div></div>
     </div>
     <div class="grid">
       <div class="card"><h2>Cohort Segmentation</h2><div id="cohortBars"></div><div id="freqMix" class="muted"></div></div>
@@ -90,6 +94,10 @@
     <div class="grid">
       <div class="card"><h2>Question Intelligence</h2><div id="questionIntel"></div></div>
       <div class="card"><h2>Weekly Insight Brief</h2><p id="brief" class="muted">Loading demo brief...</p></div>
+    </div>
+    <div class="card">
+      <h2>Topic Controversy Score</h2>
+      <div class="chart-wrap"><canvas id="controversyChart"></canvas></div>
     </div>
     <div class="card">
       <h2>Top Debater Profiles</h2>
@@ -124,6 +132,7 @@
       var rows = document.getElementById("rows");
       var profiles = document.getElementById("profiles");
       var expRows = document.getElementById("expRows");
+      var charts = {};
       function esc(s) { var d = document.createElement("div"); d.textContent = s || ""; return d.innerHTML; }
       function q() {
         var p = new URLSearchParams();
@@ -138,6 +147,7 @@
         return '<div><div class="muted">' + esc(label) + (extra ? ' <small>(' + esc(extra) + ')</small>' : '') + '</div><div class="bar"><span style="width:' + width + '%"></span></div><div>' + count + '</div></div>';
       }
       function renderBars(el, items, labelKey, valueKey, extraFn) {
+        if (!el) return;
         if (!items || !items.length) { el.innerHTML = '<p class="muted">No data.</p>'; return; }
         var max = Math.max.apply(null, items.map(function (x) { return Number(x[valueKey] || 0); }));
         el.innerHTML = items.map(function (x) { return barRow(String(x[labelKey]), Number(x[valueKey] || 0), max, extraFn ? extraFn(x) : ""); }).join("");
@@ -157,6 +167,15 @@
             "<td>" + esc(r.position_summary) + "</td>" +
             "<td>" + esc((r.toxicity_flags || []).join(", ")) + "</td>";
           rows.appendChild(tr);
+        });
+      }
+      function drawChart(key, type, labels, dataset, options) {
+        if (charts[key]) charts[key].destroy();
+        var ctx = document.getElementById(key).getContext("2d");
+        charts[key] = new Chart(ctx, {
+          type: type,
+          data: { labels: labels, datasets: dataset },
+          options: options || { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: "#e7ecff" } } }, scales: { x: { ticks: { color: "#c9d2ef" }, grid: { color: "rgba(255,255,255,.08)" } }, y: { ticks: { color: "#c9d2ef" }, grid: { color: "rgba(255,255,255,.08)" } } } }
         });
       }
       function loadData() {
@@ -182,10 +201,42 @@
             document.getElementById("kSweep").textContent = String((data.kpis && data.kpis.sweep_rate) || 0) + "%";
             document.getElementById("kTopics").textContent = String((data.topics || []).length);
             document.getElementById("kDays").textContent = String((data.daily || []).length);
-            renderBars(document.getElementById("sentimentBars"), data.counts || [], "sentiment", "count");
-            renderBars(document.getElementById("topicBars"), data.topics || [], "topic", "count", function (x) { return "avg sentiment " + Number(x.avg_sentiment || 0).toFixed(2); });
-            renderBars(document.getElementById("dailyBars"), data.daily || [], "day", "count", function (x) { return "avg " + Number(x.avg_sentiment || 0).toFixed(2); });
-            renderBars(document.getElementById("sideBars"), data.sides || [], "side_label", "count", function (x) { return "side " + x.side + " | avg " + Number(x.avg_sentiment || 0).toFixed(2); });
+            document.getElementById("kUsers").textContent = String((data.kpis && data.kpis.unique_users) || 0);
+            document.getElementById("kTox").textContent = String((data.kpis && data.kpis.toxicity_rate) || 0) + "%";
+            drawChart(
+              "sentimentChart",
+              "doughnut",
+              (data.counts || []).map(function (x) { return x.sentiment; }),
+              [{ data: (data.counts || []).map(function (x) { return x.count; }), backgroundColor: ["#2de8b0", "#7f6dff", "#f9cc53", "#ff6b6b"] }]
+            );
+            drawChart(
+              "topicChart",
+              "bar",
+              (data.topics || []).map(function (x) { return x.topic.length > 45 ? x.topic.slice(0, 45) + "..." : x.topic; }),
+              [{ label: "Volume", data: (data.topics || []).map(function (x) { return x.count; }), backgroundColor: "#7f6dff" }]
+            );
+            drawChart(
+              "dailyChart",
+              "line",
+              (data.daily || []).map(function (x) { return x.day; }),
+              [
+                { label: "Records", data: (data.daily || []).map(function (x) { return x.count; }), borderColor: "#2de8b0", backgroundColor: "rgba(45,232,176,.2)", tension: .3, fill: true },
+                { label: "Avg Sentiment", data: (data.daily || []).map(function (x) { return x.avg_sentiment; }), borderColor: "#ffb74a", backgroundColor: "rgba(255,183,74,.15)", tension: .3, yAxisID: "y1" }
+              ],
+              { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: "#e7ecff" } } }, scales: { x: { ticks: { color: "#c9d2ef" }, grid: { color: "rgba(255,255,255,.08)" } }, y: { ticks: { color: "#c9d2ef" }, grid: { color: "rgba(255,255,255,.08)" } }, y1: { position: "right", ticks: { color: "#f5cf86" }, grid: { drawOnChartArea: false } } } }
+            );
+            drawChart(
+              "sideChart",
+              "bar",
+              (data.sides || []).map(function (x) { return x.side_label.length > 28 ? x.side_label.slice(0, 28) + "..." : x.side_label; }),
+              [{ label: "Volume", data: (data.sides || []).map(function (x) { return x.count; }), backgroundColor: "#4fc3f7" }]
+            );
+            drawChart(
+              "controversyChart",
+              "bar",
+              (data.topic_insights || []).map(function (x) { return x.topic.length > 36 ? x.topic.slice(0, 36) + "..." : x.topic; }),
+              [{ label: "Controversy Score", data: (data.topic_insights || []).map(function (x) { return x.controversy_score; }), backgroundColor: "#ff8a65" }]
+            );
             renderBars(document.getElementById("cohortBars"), cohorts.tiers || [], "tier", "count", function (x) { return "avg " + Number(x.avg_sentiment || 0).toFixed(2); });
             var freq = cohorts.user_frequency || {};
             document.getElementById("freqMix").textContent = "New users: " + (freq.new || 0) + " | Returning: " + (freq.returning || 0);
