@@ -166,7 +166,6 @@ def topic_today():
 def leaderboard():
     scope = (request.args.get("scope") or "all").lower()
     conn = get_db()
-    dk = logic.day_key_from_dt()
     if scope == "daily":
         rows = conn.execute(
             """
@@ -185,6 +184,42 @@ def leaderboard():
             rows = conn.execute(
                 "SELECT handle, rating FROM users ORDER BY rating DESC LIMIT 10"
             ).fetchall()
+    elif scope == "weekly":
+        rows = conn.execute(
+            """
+            SELECT u.handle, u.rating FROM users u
+            WHERE EXISTS (
+                SELECT 1 FROM debates d
+                WHERE (d.user_a_id = u.id OR d.user_b_id = u.id)
+                AND d.status = 'completed'
+                AND date(d.ended_at) >= date('now', '-6 day')
+            )
+            ORDER BY u.rating DESC
+            LIMIT 10
+            """
+        ).fetchall()
+        if len(rows) < 3:
+            rows = conn.execute(
+                "SELECT handle, rating FROM users ORDER BY rating DESC LIMIT 10"
+            ).fetchall()
+    elif scope == "monthly":
+        rows = conn.execute(
+            """
+            SELECT u.handle, u.rating FROM users u
+            WHERE EXISTS (
+                SELECT 1 FROM debates d
+                WHERE (d.user_a_id = u.id OR d.user_b_id = u.id)
+                AND d.status = 'completed'
+                AND date(d.ended_at) >= date('now', '-29 day')
+            )
+            ORDER BY u.rating DESC
+            LIMIT 10
+            """
+        ).fetchall()
+        if len(rows) < 3:
+            rows = conn.execute(
+                "SELECT handle, rating FROM users ORDER BY rating DESC LIMIT 10"
+            ).fetchall()
     else:
         rows = conn.execute(
             "SELECT handle, rating FROM users ORDER BY rating DESC LIMIT 10"
@@ -193,6 +228,65 @@ def leaderboard():
         {
             "scope": scope,
             "rows": [{"handle": r["handle"], "rating": round(r["rating"], 1)} for r in rows],
+        }
+    )
+
+
+@app.get("/api/champions/recent")
+def champions_recent():
+    days = max(1, min(int(request.args.get("days") or 7), 30))
+    conn = get_db()
+    rows = conn.execute(
+        """
+        WITH RECURSIVE day_window(day) AS (
+            SELECT date('now')
+            UNION ALL
+            SELECT date(day, '-1 day')
+            FROM day_window
+            WHERE day > date('now', ?)
+        )
+        SELECT
+            dw.day AS day,
+            (
+              SELECT u.handle
+              FROM users u
+              WHERE EXISTS (
+                  SELECT 1 FROM debates d
+                  WHERE (d.user_a_id = u.id OR d.user_b_id = u.id)
+                  AND d.status = 'completed'
+                  AND date(d.ended_at) = dw.day
+              )
+              ORDER BY u.rating DESC
+              LIMIT 1
+            ) AS champion_handle,
+            (
+              SELECT round(u.rating, 1)
+              FROM users u
+              WHERE EXISTS (
+                  SELECT 1 FROM debates d
+                  WHERE (d.user_a_id = u.id OR d.user_b_id = u.id)
+                  AND d.status = 'completed'
+                  AND date(d.ended_at) = dw.day
+              )
+              ORDER BY u.rating DESC
+              LIMIT 1
+            ) AS champion_rating
+        FROM day_window dw
+        ORDER BY dw.day DESC
+        """,
+        (f"-{days - 1} day",),
+    ).fetchall()
+    return jsonify(
+        {
+            "days": days,
+            "rows": [
+                {
+                    "day": r["day"],
+                    "champion_handle": r["champion_handle"],
+                    "champion_rating": r["champion_rating"],
+                }
+                for r in rows
+            ],
         }
     )
 

@@ -523,10 +523,28 @@
       </article>
 
       <aside class="card hero-side" aria-label="Live rankings preview">
-        <span class="chip">Top Debaters Today</span>
+        <span class="chip">Leaderboard + Daily Champions</span>
         <div class="leaderboard">
-          <h2>Leaderboard</h2>
-          <div id="leaderboardRows">
+          <h2>Top Today</h2>
+          <div id="leaderboardRowsDaily">
+            <div class="row"><span class="muted">Loading…</span></div>
+          </div>
+        </div>
+        <div class="leaderboard">
+          <h2>Top This Week</h2>
+          <div id="leaderboardRowsWeekly">
+            <div class="row"><span class="muted">Loading…</span></div>
+          </div>
+        </div>
+        <div class="leaderboard">
+          <h2>Top This Month</h2>
+          <div id="leaderboardRowsMonthly">
+            <div class="row"><span class="muted">Loading…</span></div>
+          </div>
+        </div>
+        <div class="leaderboard">
+          <h2>Past 7 Daily #1</h2>
+          <div id="championRows">
             <div class="row"><span class="muted">Loading…</span></div>
           </div>
         </div>
@@ -620,7 +638,10 @@
       var queueBtn = document.getElementById("joinQueueBtn");
       var queueNote = document.getElementById("queueNote");
       var matchStatus = document.getElementById("matchStatus");
-      var leaderboardRows = document.getElementById("leaderboardRows");
+      var leaderboardRowsDaily = document.getElementById("leaderboardRowsDaily");
+      var leaderboardRowsWeekly = document.getElementById("leaderboardRowsWeekly");
+      var leaderboardRowsMonthly = document.getElementById("leaderboardRowsMonthly");
+      var championRows = document.getElementById("championRows");
       var handleInput = document.getElementById("handleInput");
       var registerBtn = document.getElementById("registerBtn");
       var userPill = document.getElementById("userPill");
@@ -697,23 +718,52 @@
         renderAuth();
       }
 
+      function renderLeaderboard(el, rows, emptyText) {
+        el.innerHTML = "";
+        if (!rows || rows.length === 0) {
+          el.innerHTML = '<div class="row"><span class="muted">' + emptyText + "</span></div>";
+          return;
+        }
+        rows.forEach(function (row) {
+          var div = document.createElement("div");
+          div.className = "row";
+          div.innerHTML = "<span>@" + row.handle + "</span><strong>" + Math.round(row.rating) + "</strong>";
+          el.appendChild(div);
+        });
+      }
+
       function loadLeaderboard() {
-        api("/api/leaderboard?scope=daily")
-          .then(function (data) {
-            leaderboardRows.innerHTML = "";
-            if (!data.rows || data.rows.length === 0) {
-              leaderboardRows.innerHTML = '<div class="row"><span class="muted">No players yet — be the first.</span></div>';
-              return;
-            }
-            data.rows.forEach(function (row) {
+        Promise.all([
+          api("/api/leaderboard?scope=daily"),
+          api("/api/leaderboard?scope=weekly"),
+          api("/api/leaderboard?scope=monthly"),
+          api("/api/champions/recent?days=7")
+        ])
+          .then(function (allData) {
+            var daily = allData[0];
+            var weekly = allData[1];
+            var monthly = allData[2];
+            var champs = allData[3];
+            renderLeaderboard(leaderboardRowsDaily, daily.rows, "No players yet.");
+            renderLeaderboard(leaderboardRowsWeekly, weekly.rows, "No weekly data yet.");
+            renderLeaderboard(leaderboardRowsMonthly, monthly.rows, "No monthly data yet.");
+            championRows.innerHTML = "";
+            (champs.rows || []).forEach(function (r) {
               var div = document.createElement("div");
               div.className = "row";
-              div.innerHTML = "<span>@" + row.handle + "</span><strong>" + Math.round(row.rating) + "</strong>";
-              leaderboardRows.appendChild(div);
+              if (!r.champion_handle) {
+                div.innerHTML = "<span>" + r.day + "</span><span class='muted'>No champion</span>";
+              } else {
+                div.innerHTML = "<span>" + r.day + " · @" + r.champion_handle + "</span><strong>" + Math.round(r.champion_rating || 0) + "</strong>";
+              }
+              championRows.appendChild(div);
             });
           })
           .catch(function () {
-            leaderboardRows.innerHTML = '<div class="row"><span class="muted">Could not load leaderboard.</span></div>';
+            leaderboardRowsDaily.innerHTML = '<div class="row"><span class="muted">Could not load.</span></div>';
+            leaderboardRowsWeekly.innerHTML = '<div class="row"><span class="muted">Could not load.</span></div>';
+            leaderboardRowsMonthly.innerHTML = '<div class="row"><span class="muted">Could not load.</span></div>';
+            championRows.innerHTML = '<div class="row"><span class="muted">Could not load.</span></div>';
           });
       }
 
