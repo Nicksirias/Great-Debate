@@ -2,10 +2,12 @@
 
 import json
 import os
+import random
 import re
 import secrets
 from io import BytesIO
 from pathlib import Path
+from datetime import timedelta
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
 from openpyxl import Workbook
@@ -81,6 +83,11 @@ def debate_page():
 @app.get("/results")
 def results_page():
     return send_from_directory(_FRONTEND, "results.html")
+
+
+@app.get("/fakeadmin")
+def fake_admin_index():
+    return send_from_directory(_FRONTEND, "fakeadmin.html")
 
 
 @app.get("/healthz")
@@ -927,5 +934,434 @@ def admin_sentiment_export():
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         as_attachment=True,
         download_name="great_debate_sentiment_export.xlsx",
+    )
+
+
+def _label_for_score(score: float) -> str:
+    if score >= 0.35:
+        return "positive"
+    if score <= -0.35:
+        return "negative"
+    if abs(score) < 0.12:
+        return "neutral"
+    return "mixed"
+
+
+def _build_fake_dataset() -> dict:
+    rng = random.Random(20260424)
+    now = logic.utc_now()
+    topics = [
+        {
+            "title": "Should AI-generated content require visible disclosure labels on all social feeds?",
+            "sides": [
+                "Yes - every AI-assisted post should be clearly labeled.",
+                "No - labeling should be optional or context-specific.",
+            ],
+            "weight": 0.36,
+            "base_side0": 0.26,
+            "base_side1": -0.06,
+        },
+        {
+            "title": "Should universities allow AI writing tools in graded coursework?",
+            "sides": [
+                "Yes - AI is the new calculator and should be integrated.",
+                "No - unrestricted use undermines core writing skills.",
+            ],
+            "weight": 0.22,
+            "base_side0": 0.12,
+            "base_side1": -0.24,
+        },
+        {
+            "title": "Should cities prioritize public transit over expanding roads?",
+            "sides": [
+                "Yes - invest in transit first for long-term gains.",
+                "No - road expansion remains the practical priority.",
+            ],
+            "weight": 0.26,
+            "base_side0": 0.18,
+            "base_side1": -0.12,
+        },
+        {
+            "title": "Should short-form video platforms be age-restricted for users under 16?",
+            "sides": [
+                "Yes - strict age gates are necessary for wellbeing.",
+                "No - better parental controls are enough.",
+            ],
+            "weight": 0.16,
+            "base_side0": -0.02,
+            "base_side1": 0.08,
+        },
+    ]
+    population = []
+    for i in range(120):
+        uid = i + 1
+        rating = max(980, min(2220, 1480 + int(rng.gauss(0, 220))))
+        wins = max(0, int(rng.gauss(24, 12)))
+        losses = max(0, int(rng.gauss(21, 11)))
+        population.append(
+            {
+                "user_id": uid,
+                "handle": f"debater_{uid:03d}",
+                "rating": rating,
+                "wins": wins,
+                "losses": losses,
+                "persuasion_delta": round(rng.uniform(-2.2, 2.2), 3),
+            }
+        )
+    rows = []
+    for i in range(1050):
+        topic = rng.choices(topics, weights=[t["weight"] for t in topics], k=1)[0]
+        side = 0 if rng.random() < 0.52 else 1
+        person = population[rng.randrange(len(population))]
+        debate_id = 4000 + (i // 2)
+        base = topic["base_side0"] if side == 0 else topic["base_side1"]
+        score = max(-1.0, min(1.0, base + rng.gauss(0, 0.23)))
+        flags = []
+        if score < -0.55 and rng.random() < 0.17:
+            flags.append(rng.choice(["personal_attack", "toxicity", "hostile_language"]))
+        if score < -0.7 and rng.random() < 0.08:
+            flags.append("hate_speech")
+        days_back = rng.randint(0, 60)
+        minutes_back = rng.randint(0, 1400)
+        created_at = (now - timedelta(days=days_back, minutes=minutes_back)).isoformat(timespec="seconds")
+        rows.append(
+            {
+                "debate_id": debate_id,
+                "user_id": person["user_id"],
+                "handle": person["handle"],
+                "topic_title": topic["title"],
+                "side": side,
+                "side_label": topic["sides"][side],
+                "sentiment_score": round(score, 3),
+                "sentiment_label": _label_for_score(score),
+                "position_summary": f"Argued that '{topic['sides'][side]}' best reflects practical outcomes and user impact.",
+                "toxicity_flags": flags,
+                "created_at": created_at,
+                "rating": person["rating"],
+                "wins": person["wins"],
+                "losses": person["losses"],
+                "persuasion_delta": person["persuasion_delta"],
+            }
+        )
+    return {"rows": rows}
+
+
+_FAKE_DATA = _build_fake_dataset()
+
+
+def _fake_filter_rows():
+    start = (request.args.get("start") or "").strip()
+    end = (request.args.get("end") or "").strip()
+    topic = (request.args.get("topic") or "").strip().lower()
+    side = request.args.get("side")
+    rows = _FAKE_DATA["rows"]
+    filtered = []
+    for r in rows:
+        day = str(r["created_at"])[:10]
+        if start and day < start:
+            continue
+        if end and day > end:
+            continue
+        if topic and topic not in r["topic_title"].lower():
+            continue
+        if side in ("0", "1") and int(side) != int(r["side"]):
+            continue
+        filtered.append(r)
+    return filtered
+
+
+@app.get("/api/fakeadmin/sentiment")
+def fake_admin_sentiment():
+    rows = _fake_filter_rows()
+    counts = {}
+    topics = {}
+    sides = {}
+    daily = {}
+    sweep_by_debate = {}
+    for r in rows:
+        counts[r["sentiment_label"]] = counts.get(r["sentiment_label"], 0) + 1
+        t = r["topic_title"]
+        if t not in topics:
+            topics[t] = {"count": 0, "sent_total": 0.0}
+        topics[t]["count"] += 1
+        topics[t]["sent_total"] += float(r["sentiment_score"])
+        key = (r["side"], r["side_label"])
+        if key not in sides:
+            sides[key] = {"count": 0, "sent_total": 0.0}
+        sides[key]["count"] += 1
+        sides[key]["sent_total"] += float(r["sentiment_score"])
+        d = str(r["created_at"])[:10]
+        if d not in daily:
+            daily[d] = {"count": 0, "sent_total": 0.0}
+        daily[d]["count"] += 1
+        daily[d]["sent_total"] += float(r["sentiment_score"])
+        sweep_by_debate.setdefault(r["debate_id"], []).append(float(r["sentiment_score"]))
+
+    sweep_count = sum(1 for _, v in sweep_by_debate.items() if len(v) >= 2 and abs(v[0] - v[1]) > 0.75)
+    judged_count = max(1, len(sweep_by_debate))
+    topics_list = sorted(
+        [
+            {"topic": k, "count": v["count"], "avg_sentiment": round(v["sent_total"] / max(1, v["count"]), 3)}
+            for k, v in topics.items()
+        ],
+        key=lambda x: -x["count"],
+    )[:12]
+    daily_list = sorted(
+        [
+            {"day": k, "count": v["count"], "avg_sentiment": round(v["sent_total"] / max(1, v["count"]), 3)}
+            for k, v in daily.items()
+        ],
+        key=lambda x: x["day"],
+    )
+    side_list = sorted(
+        [
+            {
+                "side": k[0],
+                "side_label": k[1],
+                "count": v["count"],
+                "avg_sentiment": round(v["sent_total"] / max(1, v["count"]), 3),
+            }
+            for k, v in sides.items()
+        ],
+        key=lambda x: -x["count"],
+    )
+    return jsonify(
+        {
+            "counts": [{"sentiment": k, "count": v} for k, v in sorted(counts.items(), key=lambda x: -x[1])],
+            "topics": topics_list,
+            "sides": side_list,
+            "daily": daily_list,
+            "kpis": {
+                "records": len(rows),
+                "sweep_rate": round((sweep_count / judged_count) * 100.0, 2),
+            },
+            "recent": sorted(rows, key=lambda x: x["created_at"], reverse=True)[:300],
+        }
+    )
+
+
+@app.get("/api/fakeadmin/question-intelligence")
+def fake_admin_question_intel():
+    rows = _fake_filter_rows()
+    grouped = {}
+    for r in rows:
+        t = r["topic_title"]
+        grouped.setdefault(t, {"topic": t, "total": 0, "sides": {}})
+        grouped[t]["total"] += 1
+        s = (r["side"], r["side_label"])
+        grouped[t]["sides"].setdefault(s, {"count": 0, "sent_total": 0.0})
+        grouped[t]["sides"][s]["count"] += 1
+        grouped[t]["sides"][s]["sent_total"] += float(r["sentiment_score"])
+    out = []
+    for _, g in grouped.items():
+        out.append(
+            {
+                "topic": g["topic"],
+                "total": g["total"],
+                "sides": [
+                    {
+                        "side": k[0],
+                        "side_label": k[1],
+                        "count": v["count"],
+                        "avg_sentiment": round(v["sent_total"] / max(1, v["count"]), 3),
+                    }
+                    for k, v in g["sides"].items()
+                ],
+            }
+        )
+    return jsonify({"topics": sorted(out, key=lambda x: -x["total"])})
+
+
+@app.get("/api/fakeadmin/cohort-segments")
+def fake_admin_cohorts():
+    rows = _fake_filter_rows()
+    tiers = {}
+    by_user = {}
+    for r in rows:
+        t = logic.tier_for_rating(float(r["rating"]))
+        tiers.setdefault(t, {"count": 0, "sent_total": 0.0})
+        tiers[t]["count"] += 1
+        tiers[t]["sent_total"] += float(r["sentiment_score"])
+        by_user[r["user_id"]] = by_user.get(r["user_id"], 0) + 1
+    return jsonify(
+        {
+            "tiers": [
+                {"tier": k, "count": v["count"], "avg_sentiment": round(v["sent_total"] / max(1, v["count"]), 3)}
+                for k, v in tiers.items()
+            ],
+            "user_frequency": {
+                "new": sum(1 for _, c in by_user.items() if c == 1),
+                "returning": sum(1 for _, c in by_user.items() if c > 1),
+            },
+        }
+    )
+
+
+@app.get("/api/fakeadmin/toxicity-trends")
+def fake_admin_toxicity():
+    rows = _fake_filter_rows()
+    by_flag = {}
+    by_day = {}
+    for r in rows:
+        day = str(r["created_at"])[:10]
+        if r["toxicity_flags"]:
+            by_day[day] = by_day.get(day, 0) + 1
+        for f in r["toxicity_flags"]:
+            by_flag[f] = by_flag.get(f, 0) + 1
+    return jsonify(
+        {
+            "by_flag": [{"flag": k, "count": v} for k, v in sorted(by_flag.items(), key=lambda x: -x[1])],
+            "by_day": [{"day": k, "count": v} for k, v in sorted(by_day.items(), key=lambda x: x[0])],
+        }
+    )
+
+
+@app.get("/api/fakeadmin/insight-brief")
+def fake_admin_brief():
+    rows = _fake_filter_rows()
+    if not rows:
+        return jsonify({"brief": "No rows match current filters."})
+    sent = {}
+    top_topic = {}
+    for r in rows:
+        sent[r["sentiment_label"]] = sent.get(r["sentiment_label"], 0) + 1
+        top_topic[r["topic_title"]] = top_topic.get(r["topic_title"], 0) + 1
+    top_sent = max(sent, key=sent.get)
+    topic = max(top_topic, key=top_topic.get)
+    avg = sum(float(r["sentiment_score"]) for r in rows) / len(rows)
+    return jsonify(
+        {
+            "brief": (
+                f"Demo window has {len(rows)} opinion rows across multiple debate themes. "
+                f"Dominant sentiment is '{top_sent}' with average score {avg:.2f}. "
+                f"Most discussed topic is '{topic}', which provides enough signal to compare side-level sentiment swings."
+            )
+        }
+    )
+
+
+@app.get("/api/fakeadmin/debater-profiles")
+def fake_admin_profiles():
+    rows = _fake_filter_rows()
+    prof = {}
+    for r in rows:
+        uid = r["user_id"]
+        prof.setdefault(
+            uid,
+            {
+                "user_id": uid,
+                "handle": r["handle"],
+                "rating": r["rating"],
+                "wins": r["wins"],
+                "losses": r["losses"],
+                "records": 0,
+                "sent_total": 0.0,
+                "persuasion_delta": r["persuasion_delta"],
+            },
+        )
+        prof[uid]["records"] += 1
+        prof[uid]["sent_total"] += float(r["sentiment_score"])
+    out = []
+    for _, p in prof.items():
+        out.append(
+            {
+                "user_id": p["user_id"],
+                "handle": p["handle"],
+                "rating": p["rating"],
+                "wins": p["wins"],
+                "losses": p["losses"],
+                "records": p["records"],
+                "avg_sentiment": round(p["sent_total"] / max(1, p["records"]), 3),
+                "persuasion_delta": p["persuasion_delta"],
+            }
+        )
+    out.sort(key=lambda x: (-x["records"], -x["rating"]))
+    return jsonify({"profiles": out[:50]})
+
+
+@app.post("/api/fakeadmin/retry-pending")
+def fake_admin_retry():
+    return jsonify({"retried": 0, "succeeded": 0, "failed": 0})
+
+
+@app.get("/api/fakeadmin/experiments")
+def fake_admin_experiments():
+    day_key = (request.args.get("day_key") or logic.day_key_from_dt()).strip()
+    variants = [
+        {
+            "day_key": day_key,
+            "variant": "A",
+            "title": "Default framing",
+            "description": "Baseline question wording",
+            "side0_label": "Yes - every AI-assisted post should be clearly labeled.",
+            "side1_label": "No - labeling should be optional or context-specific.",
+            "is_active": 1,
+            "created_at": logic.utc_now().isoformat(timespec="seconds"),
+        },
+        {
+            "day_key": day_key,
+            "variant": "B",
+            "title": "Consumer trust framing",
+            "description": "Framing emphasizes customer trust and transparency impact",
+            "side0_label": "Yes - explicit labels build trust and reduce misinformation.",
+            "side1_label": "No - context labels should be selective to avoid stigma.",
+            "is_active": 1,
+            "created_at": logic.utc_now().isoformat(timespec="seconds"),
+        },
+    ]
+    return jsonify({"day_key": day_key, "variants": variants})
+
+
+@app.post("/api/fakeadmin/experiments")
+def fake_admin_save_experiment():
+    data = request.get_json(silent=True) or {}
+    return jsonify({"ok": True, "saved": True, "echo": data})
+
+
+@app.get("/api/fakeadmin/sentiment/export.xlsx")
+def fake_admin_export():
+    rows = _fake_filter_rows()
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Fake Admin Export"
+    ws.append(
+        [
+            "debate_id",
+            "user_id",
+            "handle",
+            "topic_title",
+            "side",
+            "side_label",
+            "sentiment_label",
+            "sentiment_score",
+            "position_summary",
+            "toxicity_flags",
+            "created_at",
+        ]
+    )
+    for r in sorted(rows, key=lambda x: x["created_at"], reverse=True)[:500]:
+        ws.append(
+            [
+                r["debate_id"],
+                r["user_id"],
+                r["handle"],
+                r["topic_title"],
+                r["side"],
+                r["side_label"],
+                r["sentiment_label"],
+                r["sentiment_score"],
+                r["position_summary"],
+                ", ".join(r["toxicity_flags"]),
+                r["created_at"],
+            ]
+        )
+    bio = BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+    return send_file(
+        bio,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name="great_debate_fakeadmin_export.xlsx",
     )
 

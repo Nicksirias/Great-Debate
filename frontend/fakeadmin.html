@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Great Debate Fake Admin</title>
+  <style>
+    body { font-family: Inter, system-ui, sans-serif; margin: 0; background: #0b1020; color: #eef2ff; }
+    .wrap { width: min(1180px, 95vw); margin: 0 auto; padding: 1rem 0 2rem; }
+    .card { border: 1px solid rgba(255,255,255,.15); border-radius: 12px; background: rgba(255,255,255,.04); padding: 1rem; margin-bottom: .9rem; }
+    .row { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; }
+    input, select, button { font: inherit; border-radius: 8px; padding: .45rem .6rem; }
+    input, select { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.2); color: #fff; }
+    button { border: 0; background: #7163ff; color: #fff; cursor: pointer; }
+    .ghost { background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.2); }
+    .grid { display:grid; gap:.8rem; grid-template-columns: 1fr 1fr; }
+    .kpis { display:grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: .6rem; }
+    .kpi { border: 1px solid rgba(255,255,255,.15); border-radius: 10px; padding: .6rem; }
+    .kpi strong { display:block; font-size: 1.12rem; }
+    .muted { color: #b6bedf; }
+    table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+    th, td { border-bottom: 1px solid rgba(255,255,255,.12); text-align: left; padding: .52rem .3rem; vertical-align: top; }
+    .bar { height: 22px; background: rgba(255,255,255,.08); border-radius: 7px; overflow: hidden; margin: .35rem 0; }
+    .bar > span { display:block; height:100%; background: linear-gradient(100deg,#7f6dff,#2de8b0); }
+    @media (max-width: 930px) { .grid { grid-template-columns: 1fr; } .kpis { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Fake Admin Analytics (Demo Dataset)</h1>
+    <div class="card">
+      <p class="muted">Pre-seeded dataset with ~1000 realistic rows for analytics demos.</p>
+      <div class="row">
+        <label>Start date</label>
+        <input id="startInput" type="date" />
+        <label>End date</label>
+        <input id="endInput" type="date" />
+        <label>Side</label>
+        <select id="sideInput"><option value="">All</option><option value="0">Side 0</option><option value="1">Side 1</option></select>
+        <label>Topic contains</label>
+        <input id="topicInput" type="text" placeholder="e.g. AI disclosure" />
+      </div>
+      <div class="row" style="margin-top:.6rem;">
+        <button id="loadBtn" type="button">Apply filters</button>
+        <button id="exportBtn" class="ghost" type="button">Export Excel</button>
+        <button id="retryBtn" class="ghost" type="button">Retry Pending Judgments</button>
+      </div>
+      <p class="muted" id="status"></p>
+    </div>
+    <div class="card">
+      <h2>Topic Experiment Mode (A/B)</h2>
+      <div class="row">
+        <input id="expDay" type="date" />
+        <input id="expVariant" type="text" placeholder="Variant code (e.g. B)" style="max-width:160px;" />
+        <input id="expTitle" type="text" placeholder="Variant title" style="min-width:260px;" />
+      </div>
+      <div class="row" style="margin-top:.5rem;">
+        <input id="expDesc" type="text" placeholder="Variant description" style="min-width:420px;" />
+      </div>
+      <div class="row" style="margin-top:.5rem;">
+        <input id="expSide0" type="text" placeholder="Side 0 label" style="min-width:260px;" />
+        <input id="expSide1" type="text" placeholder="Side 1 label" style="min-width:260px;" />
+      </div>
+      <div class="row" style="margin-top:.6rem;">
+        <button id="saveExpBtn" type="button">Save Variant</button>
+        <button id="loadExpBtn" class="ghost" type="button">Load Day Variants</button>
+      </div>
+      <div id="expRows" class="muted" style="margin-top:.55rem;">No variants loaded.</div>
+    </div>
+    <div class="card">
+      <div class="kpis">
+        <div class="kpi"><span class="muted">Rows shown</span><strong id="kRecords">0</strong></div>
+        <div class="kpi"><span class="muted">Estimated sweep rate</span><strong id="kSweep">0%</strong></div>
+        <div class="kpi"><span class="muted">Distinct topics</span><strong id="kTopics">0</strong></div>
+        <div class="kpi"><span class="muted">Daily points</span><strong id="kDays">0</strong></div>
+      </div>
+    </div>
+    <div class="grid">
+      <div class="card"><h2>Sentiment Mix</h2><div id="sentimentBars"></div></div>
+      <div class="card"><h2>Top Topics by Volume</h2><div id="topicBars"></div></div>
+    </div>
+    <div class="grid">
+      <div class="card"><h2>Daily Activity Trend</h2><div id="dailyBars"></div></div>
+      <div class="card"><h2>Side Position Insights</h2><div id="sideBars"></div></div>
+    </div>
+    <div class="grid">
+      <div class="card"><h2>Cohort Segmentation</h2><div id="cohortBars"></div><div id="freqMix" class="muted"></div></div>
+      <div class="card"><h2>Toxicity Guardrails</h2><div id="toxBars"></div><div id="toxDays"></div></div>
+    </div>
+    <div class="grid">
+      <div class="card"><h2>Question Intelligence</h2><div id="questionIntel"></div></div>
+      <div class="card"><h2>Weekly Insight Brief</h2><p id="brief" class="muted">Loading demo brief...</p></div>
+    </div>
+    <div class="card">
+      <h2>Top Debater Profiles</h2>
+      <div style="overflow:auto;">
+        <table>
+          <thead>
+            <tr><th>Handle</th><th>Rating</th><th>W/L</th><th>Records</th><th>Avg sentiment</th><th>Persuasion delta</th></tr>
+          </thead>
+          <tbody id="profiles"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Filtered records</h2>
+      <div style="overflow:auto;">
+        <table>
+          <thead>
+            <tr><th>Time</th><th>Debate</th><th>Handle</th><th>Topic</th><th>Side</th><th>Sentiment</th><th>Summary</th><th>Toxicity</th></tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var startInput = document.getElementById("startInput");
+      var endInput = document.getElementById("endInput");
+      var sideInput = document.getElementById("sideInput");
+      var topicInput = document.getElementById("topicInput");
+      var status = document.getElementById("status");
+      var rows = document.getElementById("rows");
+      var profiles = document.getElementById("profiles");
+      var expRows = document.getElementById("expRows");
+      function esc(s) { var d = document.createElement("div"); d.textContent = s || ""; return d.innerHTML; }
+      function q() {
+        var p = new URLSearchParams();
+        if (startInput.value) p.set("start", startInput.value);
+        if (endInput.value) p.set("end", endInput.value);
+        if (sideInput.value) p.set("side", sideInput.value);
+        if (topicInput.value.trim()) p.set("topic", topicInput.value.trim());
+        return p.toString();
+      }
+      function barRow(label, count, max, extra) {
+        var width = max > 0 ? Math.max(2, (count / max) * 100) : 0;
+        return '<div><div class="muted">' + esc(label) + (extra ? ' <small>(' + esc(extra) + ')</small>' : '') + '</div><div class="bar"><span style="width:' + width + '%"></span></div><div>' + count + '</div></div>';
+      }
+      function renderBars(el, items, labelKey, valueKey, extraFn) {
+        if (!items || !items.length) { el.innerHTML = '<p class="muted">No data.</p>'; return; }
+        var max = Math.max.apply(null, items.map(function (x) { return Number(x[valueKey] || 0); }));
+        el.innerHTML = items.map(function (x) { return barRow(String(x[labelKey]), Number(x[valueKey] || 0), max, extraFn ? extraFn(x) : ""); }).join("");
+      }
+      function renderTable(items) {
+        rows.innerHTML = "";
+        if (!items || !items.length) { rows.innerHTML = '<tr><td colspan="8" class="muted">No records for these filters.</td></tr>'; return; }
+        items.forEach(function (r) {
+          var tr = document.createElement("tr");
+          tr.innerHTML =
+            "<td>" + esc(r.created_at) + "</td>" +
+            "<td>" + r.debate_id + "</td>" +
+            "<td>@" + esc(r.handle) + "</td>" +
+            "<td>" + esc(r.topic_title || "") + "</td>" +
+            "<td>" + r.side + " - " + esc(r.side_label || "") + "</td>" +
+            "<td>" + esc(r.sentiment_label) + " (" + Number(r.sentiment_score || 0).toFixed(2) + ")</td>" +
+            "<td>" + esc(r.position_summary) + "</td>" +
+            "<td>" + esc((r.toxicity_flags || []).join(", ")) + "</td>";
+          rows.appendChild(tr);
+        });
+      }
+      function loadData() {
+        status.textContent = "Loading demo analytics...";
+        var qs = q();
+        Promise.all([
+          fetch("/api/fakeadmin/sentiment?" + qs).then(function (r) { return r.json(); }),
+          fetch("/api/fakeadmin/cohort-segments?" + qs).then(function (r) { return r.json(); }),
+          fetch("/api/fakeadmin/toxicity-trends?" + qs).then(function (r) { return r.json(); }),
+          fetch("/api/fakeadmin/question-intelligence?" + qs).then(function (r) { return r.json(); }),
+          fetch("/api/fakeadmin/insight-brief?" + qs).then(function (r) { return r.json(); }),
+          fetch("/api/fakeadmin/debater-profiles?" + qs).then(function (r) { return r.json(); })
+        ])
+          .then(function (allData) {
+            var data = allData[0] || {};
+            var cohorts = allData[1] || {};
+            var tox = allData[2] || {};
+            var intel = allData[3] || {};
+            var briefData = allData[4] || {};
+            var profileData = allData[5] || {};
+            status.textContent = "Loaded " + ((data.kpis && data.kpis.records) || 0) + " demo rows.";
+            document.getElementById("kRecords").textContent = String((data.kpis && data.kpis.records) || 0);
+            document.getElementById("kSweep").textContent = String((data.kpis && data.kpis.sweep_rate) || 0) + "%";
+            document.getElementById("kTopics").textContent = String((data.topics || []).length);
+            document.getElementById("kDays").textContent = String((data.daily || []).length);
+            renderBars(document.getElementById("sentimentBars"), data.counts || [], "sentiment", "count");
+            renderBars(document.getElementById("topicBars"), data.topics || [], "topic", "count", function (x) { return "avg sentiment " + Number(x.avg_sentiment || 0).toFixed(2); });
+            renderBars(document.getElementById("dailyBars"), data.daily || [], "day", "count", function (x) { return "avg " + Number(x.avg_sentiment || 0).toFixed(2); });
+            renderBars(document.getElementById("sideBars"), data.sides || [], "side_label", "count", function (x) { return "side " + x.side + " | avg " + Number(x.avg_sentiment || 0).toFixed(2); });
+            renderBars(document.getElementById("cohortBars"), cohorts.tiers || [], "tier", "count", function (x) { return "avg " + Number(x.avg_sentiment || 0).toFixed(2); });
+            var freq = cohorts.user_frequency || {};
+            document.getElementById("freqMix").textContent = "New users: " + (freq.new || 0) + " | Returning: " + (freq.returning || 0);
+            renderBars(document.getElementById("toxBars"), tox.by_flag || [], "flag", "count");
+            renderBars(document.getElementById("toxDays"), tox.by_day || [], "day", "count");
+            var topics = intel.topics || [];
+            if (!topics.length) {
+              document.getElementById("questionIntel").innerHTML = '<p class="muted">No topic intelligence rows for this filter.</p>';
+            } else {
+              document.getElementById("questionIntel").innerHTML = topics.map(function (t) {
+                var sideText = (t.sides || []).map(function (s) { return s.side_label + ": " + s.count + " (avg " + Number(s.avg_sentiment || 0).toFixed(2) + ")"; }).join(" | ");
+                return '<div class="bar" style="height:auto;padding:.45rem .55rem;"><strong>' + esc(t.topic) + '</strong><div class="muted">' + esc(sideText) + "</div></div>";
+              }).join("");
+            }
+            document.getElementById("brief").textContent = briefData.brief || "No brief available.";
+            profiles.innerHTML = "";
+            (profileData.profiles || []).forEach(function (p) {
+              var tr = document.createElement("tr");
+              tr.innerHTML = "<td>@" + esc(p.handle) + "</td><td>" + Number(p.rating || 0).toFixed(0) + "</td><td>" + p.wins + "/" + p.losses + "</td><td>" + p.records + "</td><td>" + Number(p.avg_sentiment || 0).toFixed(2) + "</td><td>" + Number(p.persuasion_delta || 0).toFixed(2) + "</td>";
+              profiles.appendChild(tr);
+            });
+            if (!(profileData.profiles || []).length) {
+              profiles.innerHTML = '<tr><td colspan="6" class="muted">No profile rows in filter window.</td></tr>';
+            }
+            renderTable(data.recent || []);
+          })
+          .catch(function () { status.textContent = "Failed to load fake analytics."; });
+      }
+      document.getElementById("loadBtn").addEventListener("click", loadData);
+      document.getElementById("exportBtn").addEventListener("click", function () {
+        window.location.href = "/api/fakeadmin/sentiment/export.xlsx?" + q();
+      });
+      document.getElementById("retryBtn").addEventListener("click", function () {
+        fetch("/api/fakeadmin/retry-pending", { method: "POST" })
+          .then(function (r) { return r.json(); })
+          .then(function (d) { status.textContent = "Fake retry complete: " + (d.retried || 0) + " retried."; });
+      });
+      function selectedDay() {
+        var v = (document.getElementById("expDay").value || "").trim();
+        if (v) return v;
+        return new Date().toISOString().slice(0, 10);
+      }
+      document.getElementById("loadExpBtn").addEventListener("click", function () {
+        fetch("/api/fakeadmin/experiments?day_key=" + encodeURIComponent(selectedDay()))
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            var list = d.variants || [];
+            if (!list.length) { expRows.textContent = "No variants for " + d.day_key + "."; return; }
+            expRows.innerHTML = list.map(function (x) {
+              return "<div><strong>" + esc(x.variant) + "</strong>: " + esc(x.title) + " | " + esc(x.side0_label) + " vs " + esc(x.side1_label) + "</div>";
+            }).join("");
+          })
+          .catch(function () { expRows.textContent = "Failed to load variants."; });
+      });
+      document.getElementById("saveExpBtn").addEventListener("click", function () {
+        var body = {
+          day_key: selectedDay(),
+          variant: (document.getElementById("expVariant").value || "").trim(),
+          title: (document.getElementById("expTitle").value || "").trim(),
+          description: (document.getElementById("expDesc").value || "").trim(),
+          sides: [
+            (document.getElementById("expSide0").value || "").trim(),
+            (document.getElementById("expSide1").value || "").trim()
+          ]
+        };
+        fetch("/api/fakeadmin/experiments", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        })
+          .then(function (r) { return r.json(); })
+          .then(function () {
+            status.textContent = "Fake variant saved (demo).";
+            document.getElementById("loadExpBtn").click();
+          })
+          .catch(function () { status.textContent = "Could not save fake variant."; });
+      });
+      loadData();
+      document.getElementById("loadExpBtn").click();
+    })();
+  </script>
+</body>
+</html>
